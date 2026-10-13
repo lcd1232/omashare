@@ -508,15 +508,29 @@ Panel {
           Repeater {
             model: root.devices
             Button {
+              id: deviceRow
               required property var modelData
               required property int index
               readonly property bool current: root.sharing && root.target && root.target.address === modelData.address
               width: parent.width
               leftAlign: true
               iconText: current ? "󰄙" : "󰔂"
-              text: modelData.name + (modelData.model ? "  ·  " + modelData.model : "")
-                + (modelData.paired ? "" : "  ·  not paired")
-              tooltipText: current ? "Stop sharing" : (modelData.paired ? modelData.address : "Pair with a PIN shown on the TV")
+              // Button labels do not elide, so the label is cut to fit here.
+              readonly property string label: modelData.name + "  ·  "
+                + (modelData.paired ? (modelData.model || modelData.address) : "not paired")
+              TextMetrics {
+                id: labelMetrics
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                elide: Text.ElideRight
+                elideWidth: deviceRow.width - Style.font.icon - Style.spacing.controlGap
+                  - Style.spacing.controlPaddingX * 2 - Style.space(12)
+                text: deviceRow.label
+              }
+              text: labelMetrics.elidedText
+              // Only the row being shared explains itself; a tooltip on every
+              // row covers the section header above.
+              tooltipText: current ? "Stop sharing" : ""
               fontSize: Style.font.bodySmall
               foreground: root.bar.foreground
               fontFamily: root.bar.fontFamily
