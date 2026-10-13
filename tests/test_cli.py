@@ -7,7 +7,14 @@ from omashare import cli
 
 
 @pytest.fixture
-def pid_file(tmp_path, monkeypatch):
+def restored(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli, "restore_stale", lambda: calls.append(True))
+    return calls
+
+
+@pytest.fixture
+def pid_file(tmp_path, monkeypatch, restored):
     path = tmp_path / "omashare.pid"
     monkeypatch.setattr(cli, "PID_FILE", path)
     return path
@@ -44,3 +51,14 @@ def test_mirror_refuses_second_session(pid_file, capsys):
     assert code == 1
     assert event["event"] == "error"
     assert "already mirroring" in event["message"]
+
+
+def test_status_restores_stale_audio_when_idle(pid_file, capsys, restored):
+    run(capsys, "status")
+    assert restored == [True]
+
+
+def test_status_leaves_audio_alone_while_mirroring(pid_file, capsys, restored):
+    pid_file.write_text(str(os.getpid()))
+    run(capsys, "status")
+    assert restored == []

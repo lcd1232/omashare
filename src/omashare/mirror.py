@@ -2,12 +2,13 @@
 
 Follows the order the mirror package requires on a fresh connection: media
 pair-verify, FPLY handshake, then :class:`MirrorSession` with the live
-capture as ``video_command``.
+screen capture as ``video_command`` and the screen audio as ``audio_command``.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import subprocess
@@ -24,7 +25,8 @@ from pyatv.protocols.airplay.mirror.framing import MirrorEncryptor
 from pyatv.support.http import http_connect
 from pyatv.support.rtsp import RtspSession
 
-from omashare import capture
+from omashare import audio, capture
+from omashare.sink import AudioRoute
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,9 +73,13 @@ async def mirror(
     fps: int = 30,
     max_size: tuple[int, int] = (1920, 1080),
     cursor: bool = True,
+    audio_mode: str = "tv",
     emit: Emit = lambda *a, **k: None,
 ) -> None:
-    """Mirror *monitor* (default: the focused one) until cancelled."""
+    """Mirror *monitor* (default: the focused one) until cancelled.
+
+    *audio_mode* is one of :data:`omashare.sink.MODES`.
+    """
     mon = capture.focused_monitor()
     if monitor and monitor != mon.name:
         mon = capture.Monitor(monitor, mon.width, mon.height)
@@ -83,6 +89,7 @@ async def mirror(
     emit("connecting", host=host, port=port)
     connection = await http_connect(host, port)
     session = None
+    route = contextlib.ExitStack()
     try:
         rtsp = RtspSession(connection)
 
@@ -101,6 +108,8 @@ async def mirror(
         ctx.ekey = handshake.ekey
         ctx.audio_ekey = handshake.audio_ekey
 
+        # Routed only now, so a failed handshake never touches local audio.
+        source = route.enter_context(AudioRoute(audio_mode))
         session = MirrorSession(
             rtsp,
             None,
@@ -109,13 +118,25 @@ async def mirror(
             video_command=capture.video_command(
                 mon.name, fps, max_size[0], max_size[1], cursor
             ),
+            audio_command=audio.audio_command(source) if source else None,
             pair_secret=pair_secret,
         )
-        emit("streaming", monitor=mon.name, width=width, height=height, fps=fps)
+        emit(
+            "streaming",
+            monitor=mon.name,
+            width=width,
+            height=height,
+            fps=fps,
+            audio=audio_mode,
+        )
         await session.run()
         emit("ended", reason="receiver closed the session")
     finally:
-        if session is not None:
-            # Shielded: stop() sends TEARDOWN and must survive our own cancel.
-            await asyncio.shield(session.stop())
-        connection.close()
+        try:
+            if session is not None:
+                # Shielded: stop() sends TEARDOWN and must survive our cancel.
+                await asyncio.shield(session.stop())
+        finally:
+            # Local audio is restored whatever happened to the session.
+            route.close()
+            connection.close()

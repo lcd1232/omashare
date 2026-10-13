@@ -16,6 +16,8 @@ import signal
 import sys
 from pathlib import Path
 
+from omashare.sink import MODES, restore_stale
+
 
 def _runtime_dir() -> Path:
     return Path(os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/omashare-{os.getuid()}")
@@ -41,14 +43,23 @@ def _read_pid() -> int | None:
         return None
 
 
+def _restore_audio_if_idle() -> None:
+    """Undo a null sink left by a killed mirror, so local sound comes back
+    even if sharing is never started again. Never while a mirror runs."""
+    if _read_pid() is None:
+        restore_stale()
+
+
 def cmd_scan(args) -> int:
     from omashare.discover import scan
 
+    _restore_audio_if_idle()
     _print(asyncio.run(scan(args.timeout)))
     return 0
 
 
 def cmd_status(_args) -> int:
+    _restore_audio_if_idle()
     pid = _read_pid()
     _print({"running": pid is not None, "pid": pid})
     return 0
@@ -86,6 +97,7 @@ def cmd_mirror(args) -> int:
                 fps=args.fps,
                 max_size=(max_w, max_h),
                 cursor=not args.no_cursor,
+                audio_mode=args.audio,
                 emit=_emit,
             )
         except asyncio.CancelledError:
@@ -118,6 +130,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--fps", type=int, default=30)
     p.add_argument("--max-size", default="1920x1080", help="WxH limit")
     p.add_argument("--no-cursor", action="store_true")
+    p.add_argument(
+        "--audio",
+        choices=MODES,
+        default="tv",
+        help="tv: only on the receiver; both: also locally; off: no audio",
+    )
     p.set_defaults(func=cmd_mirror)
 
     sub.add_parser("status", help="is a mirror running").set_defaults(func=cmd_status)

@@ -25,6 +25,10 @@ Panel {
   }
   readonly property int fps: Number(setting("fps", 30)) || 30
   readonly property string maxResolution: String(setting("maxResolution", "1920x1080"))
+  readonly property string audioMode: {
+    var v = String(setting("audio", "tv"))
+    return ["tv", "both", "off"].indexOf(v) >= 0 ? v : "tv"
+  }
   readonly property bool showCursor: boolSetting("showCursor", true)
   readonly property bool notify: boolSetting("notify", true)
 
@@ -84,7 +88,8 @@ Panel {
     var cmd = [helperPath, "mirror", device.address,
                "--port", String(device.port || 7000),
                "--fps", String(fps),
-               "--max-size", maxResolution]
+               "--max-size", maxResolution,
+               "--audio", audioMode]
     if (!showCursor) cmd.push("--no-cursor")
     mirrorProc.command = cmd
     mirrorProc.running = true
@@ -114,7 +119,8 @@ Panel {
     if (msg.event === "pairing") phase = "pairing"
     else if (msg.event === "streaming") {
       phase = "streaming"
-      notifySend("Sharing screen", "Mirroring " + msg.monitor + " to " + (target ? target.name : "receiver"))
+      notifySend("Sharing screen", "Mirroring " + msg.monitor + " to " + (target ? target.name : "receiver")
+        + (msg.audio === "off" ? " (no audio)" : ""))
     } else if (msg.event === "error") {
       error = String(msg.message || "Mirroring failed")
     }
