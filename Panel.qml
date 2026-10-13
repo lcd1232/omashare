@@ -47,14 +47,22 @@ Panel {
   property bool cursorActive: false
 
   readonly property bool sharing: phase === "connecting" || phase === "pairing" || phase === "streaming"
+  readonly property bool busy: scanning || phase === "connecting" || phase === "pairing" || phase === "stopping"
+
+  // Loading texts end in dots that count up 1-2-3 while busy. The padded
+  // form keeps centred labels from shifting as the dots grow.
+  property int dotCount: 1
+  readonly property string dots: ".".repeat(dotCount)
+  readonly property string paddedDots: dots + "\u00a0".repeat(3 - dotCount)
+  onBusyChanged: dotCount = 1
 
   readonly property string statusText: {
     if (phase === "streaming") return "Sharing to " + (target ? target.name : "receiver")
-    if (phase === "connecting") return "Connecting"
-    if (phase === "pairing") return "Pairing"
-    if (phase === "stopping") return "Stopping"
+    if (phase === "connecting") return "Connecting" + dots
+    if (phase === "pairing") return "Pairing" + dots
+    if (phase === "stopping") return "Stopping" + dots
     if (phase === "error") return "Failed"
-    if (scanning) return "Searching for receivers"
+    if (scanning) return "Searching for receivers" + dots
     return devices.length ? devices.length + (devices.length === 1 ? " receiver" : " receivers") : "Not sharing"
   }
 
@@ -145,6 +153,13 @@ Panel {
   }
 
   Component.onCompleted: scan()
+
+  Timer {
+    interval: 400
+    repeat: true
+    running: root.busy
+    onTriggered: root.dotCount = root.dotCount % 3 + 1
+  }
 
   Process {
     id: scanProc
@@ -288,7 +303,7 @@ Panel {
           visible: root.sharing || root.phase === "stopping"
           width: parent.width
           iconText: "󰅙"
-          text: root.phase === "stopping" ? "Stopping…" : "Stop sharing"
+          text: root.phase === "stopping" ? "Stopping" + root.paddedDots : "Stop sharing"
           foreground: root.bar.foreground
           fontFamily: root.bar.fontFamily
           bordered: true
@@ -333,7 +348,7 @@ Panel {
             visible: root.devices.length === 0
             width: parent.width
             textFormat: Text.PlainText
-            text: root.scanning ? "Looking for Apple TVs on this network…"
+            text: root.scanning ? "Looking for Apple TVs on this network" + root.dots
               : (root.scanError || "No AirPlay receivers found.")
             wrapMode: Text.Wrap
             opacity: 0.6

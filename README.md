@@ -64,6 +64,11 @@ omarchy-shell shell rescanPlugins
 omarchy plugin enable lcd1232.omashare
 ```
 
+After you edit `Panel.qml` or `manifest.json` through the symlink, run
+`omarchy restart shell`. The shell's auto-reload uses `inotifywait -r`, which
+doesn't follow a symlinked plugin folder. `rescanPlugins` and
+disabling/enabling the plugin still load the stale compiled component.
+
 Optional hotkey in `~/.config/hypr/bindings.lua`:
 
 ```lua
