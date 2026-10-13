@@ -28,6 +28,14 @@ parec <sink>.monitor (s16le 44.1 kHz stereo)                 │
   cleanly and sends RTSP `TEARDOWN`.
 - The screen is scaled to fit the configured maximum size, keeping its aspect
   ratio. For example, a 2880×1920 panel streams at 1620×1080.
+- tvOS 27 ignores the screen audio that the pyatv branch sends as-is.
+  `tvos27.py` changes how the session is set up, matching AirParrot
+  3.1.9 (captured playing audio on tvOS 27):
+  1. A session SETUP with no streams is sent first.
+  2. Each stream SETUP uses its own URI.
+  3. The audio and video SETUPs share one `eiv`.
+  4. The audio stream gets three new fields: `isMedia`, `sr` and
+     `audioMode`.
 - Audio is encoded by calling `libfdk-aac` directly through `ctypes`. Arch's
   ffmpeg has no AAC-ELD encoder, but PipeWire already depends on the library.
 - **Audio modes** (widget setting, or `--audio`):
