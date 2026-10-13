@@ -110,8 +110,9 @@ bin/omashare stop
 - What is shared is fixed when sharing starts. A shared window that is
   resized keeps the size it had when it was picked.
 - Picture delay is about 0.26 s, measured with a millisecond clock on an
-  Apple TV 4K, and the sound keeps up with it. Audio packets are sent
-  once; AirParrot sends each twice, which helps on a lossy network.
+  Apple TV 4K, and the sound keeps up with it. Like AirParrot, every audio
+  packet is sent twice, one frame apart, so a lost Wi-Fi packet doesn't
+  leave a gap.
 - The media pair-verify signs with the identity hard-coded in the pyatv
   branch. See `media_pair_verify.py` there.
 
