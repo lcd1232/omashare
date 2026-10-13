@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "lcd1232.omashare",
+  "name": "Omashare",
+  "version": "0.1.0",
+  "author": "lcd1232",
+  "license": "MIT",
+  "description": "Mirror your screen to an Apple TV over AirPlay, from the Omarchy bar. Prototype: video only.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "Panel.qml" },
+  "barWidget": {
+    "displayName": "Omashare",
+    "description": "Find AirPlay receivers and mirror the focused monitor to one.",
+    "category": "Media",
+    "aliases": ["airplay", "apple tv", "cast", "mirror", "screen share"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "fps": 30,
+      "maxResolution": "1920x1080",
+      "showCursor": true,
+      "notify": true
+    },
+    "schema": [
+      { "key": "fps", "type": "enum", "label": "Frame rate", "options": [30, 60], "defaultValue": 30 },
+      {
+        "key": "maxResolution",
+        "type": "enum",
+        "label": "Maximum stream resolution",
+        "description": "The screen is scaled down to fit, keeping its aspect ratio.",
+        "options": ["1280x720", "1920x1080", "3840x2160"],
+        "defaultValue": "1920x1080"
+      },
+      { "key": "showCursor", "type": "boolean", "label": "Show the mouse cursor", "defaultValue": true },
+      { "key": "notify", "type": "boolean", "label": "Notify when sharing starts and stops", "defaultValue": true }
+    ]
+  }
+}

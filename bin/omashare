@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Runs the omashare helper from this plugin's own uv project. The first run
+# installs pyatv from the fork. The venv lives outside the plugin folder:
+# Omarchy refuses plugin folders that contain symlinks, and a venv has them.
+set -euo pipefail
+root="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+export UV_PROJECT_ENVIRONMENT="${XDG_DATA_HOME:-$HOME/.local/share}/omashare/venv"
+exec uv run --quiet --frozen --no-dev --project "$root" omashare "$@"
