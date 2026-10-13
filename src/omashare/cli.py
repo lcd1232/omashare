@@ -11,6 +11,7 @@ import argparse
 import asyncio
 import json
 import logging
+import logging.handlers
 import os
 import signal
 import sys
@@ -149,13 +150,34 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("stop", help="stop the running mirror").set_defaults(func=cmd_stop)
 
     args = parser.parse_args(argv)
-    # Logs go to stderr; stdout is reserved for JSON.
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        stream=sys.stderr,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    _setup_logging(args.verbose, args.command == "mirror")
     return args.func(args)
+
+
+def log_file() -> Path:
+    base = os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state"
+    return Path(base) / "omashare" / "omashare.log"
+
+
+def _setup_logging(verbose: bool, to_file: bool) -> None:
+    """Log to stderr (stdout is reserved for JSON) and, for ``mirror``, to a
+    debug log file, since the bar widget does not keep the helper's stderr."""
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    stderr = logging.StreamHandler(sys.stderr)
+    stderr.setLevel(logging.DEBUG if verbose else logging.INFO)
+    stderr.setFormatter(fmt)
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    root.addHandler(stderr)
+    if to_file:
+        path = log_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.handlers.RotatingFileHandler(
+            path, maxBytes=2_000_000, backupCount=2
+        )
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(fmt)
+        root.addHandler(handler)
 
 
 if __name__ == "__main__":
