@@ -12,7 +12,6 @@ Mirror your Omarchy screen to an Apple TV over AirPlay, from the bar.
 Panel.qml ── bin/omashare scan ───────────► pyatv.scan (mDNS, AirPlay)
           └─ bin/omashare mirror <host> ──► media pair-verify → FPLY handshake
                                             → MirrorSession (type-110 video over TCP)
-                                                 ▲ video_command
                                                  ▲ video_command   ▲ audio_command
 gpu-screen-recorder (VAAPI/NVENC H.264, focused monitor)     │
   └─ mpegts ─► ffmpeg -c copy -bsf h264_mp4toannexb ─► Annex-B H.264
