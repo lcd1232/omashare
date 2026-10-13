@@ -50,6 +50,10 @@ parec <sink>.monitor (s16le 44.1 kHz stereo)                 │
   - `both`: the current output's monitor is captured, so sound also plays
     locally.
   - `off`: video only.
+  - If EasyEffects is running, its input is captured: the apps' mix before
+    any effects. A laptop-speaker preset otherwise reaches the TV too. With
+    this machine's preset that measured +15 dB bass, mids 6–8 dB lower and
+    +12 dB treble.
 - The capture pipelines use `PR_SET_PDEATHSIG`. When the session kills it,
   `gpu-screen-recorder`, `ffmpeg` and `parec` exit too.
 

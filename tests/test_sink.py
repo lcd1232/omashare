@@ -8,10 +8,11 @@ from omashare.sink import AudioRoute, restore_stale
 
 
 class FakePactl:
-    def __init__(self, default="speakers", inputs="12\t3\t-\tfloat32le\n13\t3\t-\ts16le"):
+    def __init__(self, default="speakers", inputs="12\t3\t-\tfloat32le\n13\t3\t-\ts16le", sinks=None):
         self.calls = []
         self.default = default
         self.inputs = inputs
+        self.sinks = sinks or ["speakers"]
         self.fail = set()
 
     def __call__(self, args):
@@ -24,6 +25,8 @@ class FakePactl:
             return "536870913"
         if args[:3] == ["list", "short", "sink-inputs"]:
             return self.inputs
+        if args[:3] == ["list", "short", "sinks"]:
+            return "\n".join(f"{i}\t{n}\tPipeWire\tfloat32le 2ch 48000Hz\tIDLE" for i, n in enumerate(self.sinks))
         if args[0] == "set-default-sink":
             self.default = args[1]
         return ""
@@ -45,7 +48,7 @@ def test_both_captures_default_monitor_without_rerouting(state):
     pactl = FakePactl()
     with AudioRoute("both", pactl=pactl, state_file=state) as source:
         assert source == "speakers.monitor"
-    assert pactl.calls == [["get-default-sink"]]
+    assert pactl.calls == [["get-default-sink"], ["list", "short", "sinks"]]
 
 
 def test_tv_routes_to_null_sink_and_restores(state):
@@ -117,3 +120,18 @@ def test_sink_of_a_dead_owner_is_restored(state):
     restore_stale(pactl, state)
     assert ["unload-module", "77"] in pactl.calls
     assert not state.exists()
+
+
+@pytest.mark.parametrize("mode", ["tv", "both"])
+def test_easyeffects_input_is_captured_before_its_effects(state, mode):
+    pactl = FakePactl(sinks=["speakers", "easyeffects_sink"])
+    with AudioRoute(mode, pactl=pactl, state_file=state) as source:
+        assert source == "easyeffects_sink.monitor"
+        if mode == "tv":
+            assert pactl.default == "omashare"
+
+
+def test_effects_are_kept_when_asked(state):
+    pactl = FakePactl(sinks=["speakers", "easyeffects_sink"])
+    with AudioRoute("tv", bypass_effects=False, pactl=pactl, state_file=state) as source:
+        assert source == "omashare.monitor"

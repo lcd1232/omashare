@@ -5,6 +5,10 @@ sink is loaded and made the default while sharing, and its monitor is
 captured. ``both``: the default sink's monitor is captured, so sound plays
 locally too. ``off``: no screen audio.
 
+If EasyEffects is running, its input (the apps' mix before any effects) is
+captured instead. Its presets are tuned for the local speakers -- on a
+laptop typically +15 dB of bass and scooped mids -- and sound wrong on a TV.
+
 The null sink, the previous default and the owning process are recorded in a
 state file, so a helper that was killed without restoring them is cleaned up
 on the next run -- but never while that process is still alive.
@@ -22,6 +26,9 @@ from typing import Callable, Optional
 _LOGGER = logging.getLogger(__name__)
 
 SINK_NAME = "omashare"
+#: EasyEffects' virtual sink; apps play into it and it plays the processed
+#: result into the default output.
+EFFECTS_SINK = "easyeffects_sink"
 MODES = ("tv", "both", "off")
 
 Runner = Callable[[list[str]], str]
@@ -45,12 +52,14 @@ class AudioRoute:
         self,
         mode: str,
         *,
+        bypass_effects: bool = True,
         pactl: Runner = _pactl,
         state_file: Optional[Path] = None,
     ) -> None:
         if mode not in MODES:
             raise ValueError(f"audio mode must be one of {MODES}, got {mode!r}")
         self.mode = mode
+        self.bypass_effects = bypass_effects
         self._pactl = pactl
         self._state_file = state_file or _state_file()
         self._module: Optional[str] = None
@@ -61,8 +70,9 @@ class AudioRoute:
         if self.mode == "off":
             return None
         default = self._pactl(["get-default-sink"])
+        effects = self._effects_monitor()
         if self.mode == "both":
-            return f"{default}.monitor"
+            return effects or f"{default}.monitor"
 
         self._previous = default
         self._module = self._pactl(
@@ -86,7 +96,21 @@ class AudioRoute:
             if stream_id.isdigit():
                 self._try(["move-sink-input", stream_id, SINK_NAME])
         _LOGGER.info("audio: routed output to %s (was %s)", SINK_NAME, default)
-        return f"{SINK_NAME}.monitor"
+        return effects or f"{SINK_NAME}.monitor"
+
+    def _effects_monitor(self) -> Optional[str]:
+        """The monitor of EasyEffects' input sink, if it should be captured."""
+        if not self.bypass_effects:
+            return None
+        try:
+            sinks = self._pactl(["list", "short", "sinks"])
+        except (subprocess.CalledProcessError, OSError):
+            return None
+        names = {line.split("\t")[1] for line in sinks.splitlines() if "\t" in line}
+        if EFFECTS_SINK in names:
+            _LOGGER.info("audio: capturing %s, before EasyEffects", EFFECTS_SINK)
+            return f"{EFFECTS_SINK}.monitor"
+        return None
 
     def __exit__(self, *exc) -> None:
         if self._module is None:
