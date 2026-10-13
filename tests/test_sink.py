@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 
 import pytest
@@ -57,6 +58,7 @@ def test_tv_routes_to_null_sink_and_restores(state):
         assert json.loads(state.read_text()) == {
             "module": "536870913",
             "previous": "speakers",
+            "pid": os.getpid(),
         }
     assert pactl.default == "speakers"
     assert pactl.calls[-1] == ["unload-module", "536870913"]
@@ -97,3 +99,21 @@ def test_new_route_cleans_up_stale_state_first(state):
 def test_unknown_mode_is_rejected():
     with pytest.raises(ValueError):
         AudioRoute("loud")
+
+
+def test_sink_of_a_running_owner_is_not_stale(state):
+    state.write_text(json.dumps({"module": "77", "previous": "headphones", "pid": os.getpid()}))
+    pactl = FakePactl(default="omashare")
+    restore_stale(pactl, state)
+    assert pactl.calls == []
+    assert state.exists()
+
+
+def test_sink_of_a_dead_owner_is_restored(state):
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    state.write_text(json.dumps({"module": "77", "previous": "headphones", "pid": dead.pid}))
+    pactl = FakePactl(default="omashare")
+    restore_stale(pactl, state)
+    assert ["unload-module", "77"] in pactl.calls
+    assert not state.exists()

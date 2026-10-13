@@ -5,8 +5,9 @@ sink is loaded and made the default while sharing, and its monitor is
 captured. ``both``: the default sink's monitor is captured, so sound plays
 locally too. ``off``: no screen audio.
 
-The null sink and the previous default are recorded in a state file so a
-helper that was killed without restoring them is cleaned up on the next run.
+The null sink, the previous default and the owning process are recorded in a
+state file, so a helper that was killed without restoring them is cleaned up
+on the next run -- but never while that process is still alive.
 """
 
 from __future__ import annotations
@@ -74,7 +75,9 @@ class AudioRoute:
         )
         self._state_file.parent.mkdir(parents=True, exist_ok=True)
         self._state_file.write_text(
-            json.dumps({"module": self._module, "previous": default})
+            json.dumps(
+                {"module": self._module, "previous": default, "pid": os.getpid()}
+            )
         )
         self._pactl(["set-default-sink", SINK_NAME])
         # Streams pinned to a sink don't follow the default; move them over.
@@ -103,12 +106,29 @@ class AudioRoute:
             _LOGGER.warning("pactl %s failed: %s", " ".join(args), exc)
 
 
+def _alive(pid: object) -> bool:
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def restore_stale(pactl: Runner = _pactl, state_file: Optional[Path] = None) -> None:
-    """Undo a null sink left behind by a helper that didn't exit cleanly."""
+    """Undo a null sink left behind by a helper that didn't exit cleanly.
+
+    A sink whose owner is still running is in use, not stale, and is kept.
+    """
     path = state_file or _state_file()
     try:
         state = json.loads(path.read_text())
     except (OSError, ValueError):
+        return
+    if _alive(state.get("pid")):
         return
     _LOGGER.info("audio: cleaning up a stale %s sink", SINK_NAME)
     for args in (
