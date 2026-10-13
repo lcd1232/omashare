@@ -30,9 +30,21 @@
       "maxResolution": "1920x1080",
       "audio": "tv",
       "showCursor": true,
-      "notify": true
+      "notify": true,
+      "source": "picker"
     },
     "schema": [
+      {
+        "key": "source",
+        "type": "enum",
+        "label": "What to share",
+        "description": "picker: choose a screen, window or region in the screen-share dialog each time. monitor: share the focused monitor without asking.",
+        "options": [
+          "picker",
+          "monitor"
+        ],
+        "defaultValue": "picker"
+      },
       {
         "key": "fps",
         "type": "enum",

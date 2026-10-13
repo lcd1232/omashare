@@ -31,7 +31,16 @@ _LOGGER = logging.getLogger(__name__)
 
 AIRPLAY_PORT = 7000
 
+#: What to share: the dialog's pick, or the focused monitor without asking.
+SOURCES = ("picker", "monitor")
+
 Emit = Callable[..., None]
+
+
+def runtime_dir() -> Path:
+    path = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/omashare-{os.getuid()}")
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def cache_dir() -> Path:
@@ -73,16 +82,37 @@ async def mirror(
     max_size: tuple[int, int] = (1920, 1080),
     cursor: bool = True,
     audio_mode: str = "tv",
+    source: str = "picker",
     emit: Emit = lambda *a, **k: None,
 ) -> None:
-    """Mirror *monitor* (default: the focused one) until cancelled.
+    """Mirror until cancelled.
 
-    *audio_mode* is one of :data:`omashare.sink.MODES`.
+    *source* is one of :data:`SOURCES`: ``picker`` shows the screen-share
+    dialog first (and returns quietly if it is cancelled), ``monitor``
+    shares *monitor*, by default the focused one. *audio_mode* is one of
+    :data:`omashare.sink.MODES`.
     """
-    mon = capture.focused_monitor()
-    if monitor and monitor != mon.name:
-        mon = capture.Monitor(monitor, mon.width, mon.height)
-    width, height = capture.fit_size(mon.width, mon.height, *max_size)
+    if source not in SOURCES:
+        raise ValueError(f"source must be one of {SOURCES}, got {source!r}")
+    portal_token: Path | None = None
+    if source == "picker":
+        # Picked before connecting, so the receiver sees nothing meanwhile.
+        portal_token = runtime_dir() / "omashare-portal-token"
+        emit("choosing")
+        try:
+            width, height = await capture.pick_source(
+                portal_token, fps, *max_size, cursor
+            )
+        except capture.PickCancelled:
+            emit("ended", reason="cancelled")
+            return
+        target, label = capture.PORTAL, "your selection"
+    else:
+        mon = capture.focused_monitor()
+        if monitor and monitor != mon.name:
+            mon = capture.Monitor(monitor, mon.width, mon.height)
+        width, height = capture.fit_size(mon.width, mon.height, *max_size)
+        target, label = mon.name, mon.name
     h264_path = placeholder_h264()
 
     emit("connecting", host=host, port=port)
@@ -115,14 +145,14 @@ async def mirror(
             ctx,
             h264_path,
             video_command=capture.video_command(
-                mon.name, fps, max_size[0], max_size[1], cursor
+                target, fps, max_size[0], max_size[1], cursor, portal_token
             ),
             audio_command=audio.audio_command(source) if source else None,
             pair_secret=pair_secret,
         )
         emit(
             "streaming",
-            monitor=mon.name,
+            monitor=label,
             width=width,
             height=height,
             fps=fps,

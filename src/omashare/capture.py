@@ -4,6 +4,12 @@ The mirror session runs ``video_command`` through a shell and SIGKILLs it on
 stop, which would orphan a plain ``gsr | ffmpeg`` pipeline. So the command is
 ``exec python -m omashare.capture ...``: this module becomes that process,
 starts the pipeline with PR_SET_PDEATHSIG, and the children die with it.
+
+The source is a monitor, or whatever was picked in the desktop's screen-share
+dialog (xdg-desktop-portal; on Omarchy, hyprland-preview-share-picker).
+:func:`pick_source` shows that dialog and learns the picked source's size;
+the portal restore token it leaves behind lets the session's own capture
+reopen the same source without asking again.
 SIGKILL, not SIGTERM: on SIGTERM both tools try to flush a trailer into a
 pipe nobody reads any more and hang; a live stream has nothing to finalize.
 """
@@ -11,6 +17,7 @@ pipe nobody reads any more and hang; a live stream has nothing to finalize.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import ctypes
 import json
 import shlex
@@ -18,8 +25,21 @@ import signal
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+
+from pyatv.protocols.airplay.mirror import pacer
+
+from omashare.h264 import find_sps, sps_dimensions
 
 PR_SET_PDEATHSIG = 1
+
+#: gpu-screen-recorder's capture target for the screen-share portal.
+PORTAL = "portal"
+
+
+class PickCancelled(Exception):
+    """The screen-share dialog was closed without picking anything."""
 
 
 @dataclass(frozen=True)
@@ -54,12 +74,31 @@ def fit_size(width: int, height: int, max_w: int, max_h: int) -> tuple[int, int]
 
 
 def pipeline_argv(
-    monitor: str, fps: int, max_w: int, max_h: int, cursor: bool
+    target: str,
+    fps: int,
+    max_w: int,
+    max_h: int,
+    cursor: bool,
+    portal_token: Optional[Path] = None,
 ) -> tuple[list[str], list[str]]:
-    """The gpu-screen-recorder and ffmpeg argv of the capture pipeline."""
+    """The gpu-screen-recorder and ffmpeg argv of the capture pipeline.
+
+    *target* is a monitor name or :data:`PORTAL`. For the portal, a restore
+    token in *portal_token* reopens the source picked last time; without one
+    the screen-share dialog is shown and the new token is saved there.
+    """
+    portal_args: list[str] = []
+    if target == PORTAL:
+        if portal_token is None:
+            raise ValueError("portal capture needs a token file")
+        portal_args = [
+            "-restore-portal-session", "yes",
+            "-portal-session-token-filepath", str(portal_token),
+        ]  # fmt: skip
     gsr = [
         "gpu-screen-recorder",
-        "-w", monitor,
+        "-w", target,
+        *portal_args,
         "-c", "mpegts",
         "-k", "h264",
         "-f", str(fps),
@@ -80,16 +119,77 @@ def pipeline_argv(
     return gsr, ffmpeg
 
 
-def video_command(monitor: str, fps: int, max_w: int, max_h: int, cursor: bool) -> str:
-    """Shell command for MirrorSession's ``video_command``."""
+def capture_argv(
+    target: str,
+    fps: int,
+    max_w: int,
+    max_h: int,
+    cursor: bool,
+    portal_token: Optional[Path] = None,
+) -> list[str]:
+    """argv that runs this module as the capture process."""
     args = [
         sys.executable, "-m", "omashare.capture",
-        "--monitor", monitor, "--fps", str(fps),
+        "--target", target, "--fps", str(fps),
         "--max-size", f"{max_w}x{max_h}",
     ]  # fmt: skip
+    if portal_token is not None:
+        args += ["--portal-token", str(portal_token)]
     if not cursor:
         args.append("--no-cursor")
-    return "exec " + shlex.join(args)
+    return args
+
+
+def video_command(
+    target: str,
+    fps: int,
+    max_w: int,
+    max_h: int,
+    cursor: bool,
+    portal_token: Optional[Path] = None,
+) -> str:
+    """Shell command for MirrorSession's ``video_command``."""
+    return "exec " + shlex.join(
+        capture_argv(target, fps, max_w, max_h, cursor, portal_token)
+    )
+
+
+async def pick_source(
+    portal_token: Path, fps: int, max_w: int, max_h: int, cursor: bool
+) -> tuple[int, int]:
+    """Show the screen-share dialog and return the picked source's size.
+
+    The size is the encoded one (already fitted into max_w x max_h), read
+    from the first SPS. Leaves a restore token in *portal_token* for the
+    session's capture. Raises :class:`PickCancelled` if nothing was picked.
+    """
+    # No token: the dialog is shown every time, not just the first time.
+    portal_token.unlink(missing_ok=True)
+    proc = await asyncio.create_subprocess_exec(
+        *capture_argv(PORTAL, fps, max_w, max_h, cursor, portal_token),
+        stdout=asyncio.subprocess.PIPE,
+    )
+    assert proc.stdout is not None
+    buf = b""
+    try:
+        while True:
+            chunk = await proc.stdout.read(65536)
+            if not chunk:
+                raise PickCancelled()
+            buf += chunk
+            starts = pacer.find_start_codes(buf)
+            # Only NALs followed by another start code are complete.
+            complete = [
+                buf[pos + length : starts[i + 1][0]]
+                for i, (pos, length) in enumerate(starts[:-1])
+            ]
+            sps = find_sps(complete)
+            if sps is not None:
+                return sps_dimensions(sps)
+    finally:
+        if proc.returncode is None:
+            proc.kill()
+        await proc.wait()
 
 
 def _die_with_parent() -> None:
@@ -99,7 +199,8 @@ def _die_with_parent() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="omashare.capture")
-    parser.add_argument("--monitor", required=True)
+    parser.add_argument("--target", required=True, help=f"monitor or {PORTAL}")
+    parser.add_argument("--portal-token", type=Path)
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--max-size", default="1920x1080")
     parser.add_argument("--no-cursor", action="store_true")
@@ -108,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _die_with_parent()
     gsr_argv, ffmpeg_argv = pipeline_argv(
-        args.monitor, args.fps, max_w, max_h, not args.no_cursor
+        args.target, args.fps, max_w, max_h, not args.no_cursor, args.portal_token
     )
     gsr = subprocess.Popen(
         gsr_argv,

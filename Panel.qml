@@ -29,6 +29,7 @@ Panel {
     var v = String(setting("audio", "tv"))
     return ["tv", "both", "off"].indexOf(v) >= 0 ? v : "tv"
   }
+  readonly property string source: setting("source", "picker") === "monitor" ? "monitor" : "picker"
   readonly property bool showCursor: boolSetting("showCursor", true)
   readonly property bool notify: boolSetting("notify", true)
 
@@ -36,7 +37,7 @@ Panel {
   property bool scanning: false
   property string scanError: ""
 
-  // idle | connecting | pairing | streaming | stopping | error
+  // idle | choosing | connecting | pairing | streaming | stopping | error
   property string phase: "idle"
   property var target: null
   property string error: ""
@@ -46,7 +47,7 @@ Panel {
   property int deviceIndex: 0
   property bool cursorActive: false
 
-  readonly property bool sharing: phase === "connecting" || phase === "pairing" || phase === "streaming"
+  readonly property bool sharing: phase === "choosing" || phase === "connecting" || phase === "pairing" || phase === "streaming"
 
   // The rescan button shows dots counting up 1-2-3 while a scan runs,
   // padded to three characters so the button keeps its width.
@@ -56,6 +57,7 @@ Panel {
 
   readonly property string statusText: {
     if (phase === "streaming") return "Sharing to " + (target ? target.name : "receiver")
+    if (phase === "choosing") return "Choose what to share"
     if (phase === "connecting") return "Connecting"
     if (phase === "pairing") return "Pairing"
     if (phase === "stopping") return "Stopping"
@@ -90,8 +92,9 @@ Panel {
     error = ""
     _stderrTail = ""
     _userStopped = false
-    phase = "connecting"
+    phase = source === "picker" ? "choosing" : "connecting"
     var cmd = [helperPath, "mirror", device.address,
+               "--source", source,
                "--port", String(device.port || 7000),
                "--fps", String(fps),
                "--max-size", maxResolution,
@@ -99,6 +102,8 @@ Panel {
     if (!showCursor) cmd.push("--no-cursor")
     mirrorProc.command = cmd
     mirrorProc.running = true
+    // Get out of the way of the screen-share dialog.
+    if (source === "picker") close()
   }
 
   function stop() {
@@ -122,7 +127,9 @@ Panel {
   function handleEvent(line) {
     var msg
     try { msg = JSON.parse(line) } catch (e) { return }
-    if (msg.event === "pairing") phase = "pairing"
+    if (msg.event === "choosing") phase = "choosing"
+    else if (msg.event === "connecting") phase = "connecting"
+    else if (msg.event === "pairing") phase = "pairing"
     else if (msg.event === "streaming") {
       phase = "streaming"
       notifySend("Sharing screen", "Mirroring " + msg.monitor + " to " + (target ? target.name : "receiver")

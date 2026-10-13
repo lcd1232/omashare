@@ -98,6 +98,7 @@ def cmd_mirror(args) -> int:
                 max_size=(max_w, max_h),
                 cursor=not args.no_cursor,
                 audio_mode=args.audio,
+                source=args.source,
                 emit=_emit,
             )
         except asyncio.CancelledError:
@@ -126,7 +127,13 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("mirror", help="mirror the screen to a receiver")
     p.add_argument("host")
     p.add_argument("--port", type=int, default=7000)
-    p.add_argument("--monitor", help="Hyprland output (default: focused)")
+    p.add_argument(
+        "--source",
+        choices=("picker", "monitor"),
+        default="picker",
+        help="picker: choose in the screen-share dialog; monitor: share --monitor",
+    )
+    p.add_argument("--monitor", help="Hyprland output for --source monitor (default: focused)")
     p.add_argument("--fps", type=int, default=30)
     p.add_argument("--max-size", default="1920x1080", help="WxH limit")
     p.add_argument("--no-cursor", action="store_true")

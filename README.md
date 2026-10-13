@@ -26,8 +26,18 @@ parec <sink>.monitor (s16le 44.1 kHz stereo)                 │
 - `mirror` prints JSON lines (`{"event": "connecting" | "pairing" |
   "streaming" | "ended" | "error"}`) for the widget. SIGTERM stops it
   cleanly and sends RTSP `TEARDOWN`.
-- The screen is scaled to fit the configured maximum size, keeping its aspect
-  ratio. For example, a 2880×1920 panel streams at 1620×1080.
+- **Choosing what to share:** by default the desktop's screen-share dialog
+  opens, which on Omarchy is `hyprland-preview-share-picker` with Screens,
+  Windows and Region tabs. You pick before anything connects to the TV.
+  - A short probe capture reads the picked source's real size from its
+    H.264 SPS.
+  - The session's own capture then reopens the same source from the
+    portal's restore token, so the dialog isn't shown twice.
+  - Cancelling the dialog ends quietly.
+  - To share the focused monitor without asking, set the widget's "What
+    to share" setting to `monitor`, or pass `--source monitor`.
+- The shared source is scaled to fit the configured maximum size, keeping its
+  aspect ratio. For example, a 2880×1920 panel streams at 1620×1080.
 - tvOS 27 ignores the screen audio that the pyatv branch sends as-is.
   `tvos27.py` changes how the session is set up, matching AirParrot
   3.1.9 (captured playing audio on tvOS 27):
@@ -86,6 +96,7 @@ From a terminal:
 ```sh
 bin/omashare scan
 bin/omashare mirror 192.168.88.63 --fps 30 --max-size 1920x1080 --audio tv
+bin/omashare mirror 192.168.88.63 --source monitor   # no dialog
 bin/omashare status
 bin/omashare stop
 ```
@@ -98,8 +109,11 @@ bin/omashare stop
 - In `tv` mode, apps that pin themselves to a specific sink are moved to the
   null sink. When sharing stops they return to the restored default, not to
   the sink they had pinned.
-- Only the focused monitor is mirrored, and the choice is made when sharing
-  starts.
+- What is shared is fixed when sharing starts. A shared window that is
+  resized keeps the size it had when it was picked.
+- The delay is noticeably longer than AirParrot's, and the sound is worse.
+  pyatv waits for about 2 s of audio before sending any, and doesn't send
+  audio packets twice the way AirParrot does.
 - The media pair-verify signs with the identity hard-coded in the pyatv
   branch. See `media_pair_verify.py` there.
 
