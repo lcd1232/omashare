@@ -38,8 +38,8 @@ parec <sink>.monitor (s16le 44.1 kHz stereo)                 │
     to share" setting to `monitor`, or pass `--source monitor`.
 - The shared source is scaled to fit the configured maximum size, keeping its
   aspect ratio. For example, a 2880×1920 panel streams at 1620×1080.
-- tvOS 27 plays mirrored audio only from a session set up the way AirParrot
-  3.1.9 sets one up. The pyatv branch does this as of `d9be77bf`.
+- tvOS 27 plays mirrored audio only from a session set up in a particular
+  way. The pyatv branch does this as of `d9be77bf`.
 - Audio is encoded by calling `libfdk-aac` directly through `ctypes`. Arch's
   ffmpeg has no AAC-ELD encoder, but PipeWire already depends on the library.
 - **Audio modes** (widget setting, or `--audio`):
@@ -110,9 +110,8 @@ bin/omashare stop
 - What is shared is fixed when sharing starts. A shared window that is
   resized keeps the size it had when it was picked.
 - Picture delay is about 0.26 s, measured with a millisecond clock on an
-  Apple TV 4K, and the sound keeps up with it. Like AirParrot, every audio
-  packet is sent twice, one frame apart, so a lost Wi-Fi packet doesn't
-  leave a gap.
+  Apple TV 4K, and the sound keeps up with it. Every audio packet is sent
+  twice, one frame apart, so a lost Wi-Fi packet doesn't leave a gap.
 - The media pair-verify signs with the identity hard-coded in the pyatv
   branch. See `media_pair_verify.py` there.
 
