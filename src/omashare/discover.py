@@ -8,10 +8,15 @@ import pyatv
 from pyatv.const import Protocol
 
 
-async def scan(timeout: float = 3.0) -> list[dict]:
-    """Return the AirPlay receivers that answer within *timeout* seconds."""
+async def scan(timeout: float = 3.0, hosts: list[str] | None = None) -> list[dict]:
+    """Return the AirPlay receivers that answer within *timeout* seconds.
+
+    With *hosts*, only those addresses are asked.
+    """
     loop = asyncio.get_running_loop()
-    confs = await pyatv.scan(loop, timeout=timeout, protocol=Protocol.AirPlay)
+    confs = await pyatv.scan(
+        loop, timeout=timeout, protocol=Protocol.AirPlay, hosts=hosts
+    )
     devices = []
     for conf in confs:
         service = conf.get_service(Protocol.AirPlay)

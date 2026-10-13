@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Callable
 
 from pyatv.protocols.airplay.mirror import (
+    MediaIdentity,
     MirrorContext,
     MirrorSession,
     media_pair_verify,
@@ -78,6 +79,7 @@ async def mirror(
     host: str,
     port: int = AIRPLAY_PORT,
     *,
+    identity: MediaIdentity,
     monitor: str | None = None,
     fps: int = 30,
     max_size: tuple[int, int] = (1920, 1080),
@@ -88,6 +90,7 @@ async def mirror(
 ) -> None:
     """Mirror until cancelled.
 
+    *identity* is the one paired with this receiver (``omashare pair``).
     *source* is one of :data:`SOURCES`: ``picker`` shows the screen-share
     dialog first (and returns quietly if it is cancelled), ``monitor``
     shares *monitor*, by default the focused one. *audio_mode* is one of
@@ -124,7 +127,7 @@ async def mirror(
         rtsp = RtspSession(connection)
 
         emit("pairing")
-        pair_secret = await media_pair_verify(rtsp)
+        pair_secret = await media_pair_verify(rtsp, identity)
         handshake = await run_fply_handshake(connection)
 
         ctx = MirrorContext(width=width, height=height, fps=fps, name="Omarchy")

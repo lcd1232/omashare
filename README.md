@@ -89,10 +89,20 @@ Open the panel, then click a receiver or select one with the arrow keys and
 press Enter. Clicking it again or using **Stop sharing** ends the mirror.
 Right-clicking the bar icon also stops it.
 
+**Pairing:** the first time you pick a receiver, it shows a 4-digit PIN.
+Type it into the panel and press **Pair**; the share then starts. omashare
+registers a key of its own with that receiver and keeps it in
+`~/.config/omashare/devices.json` (mode 600). Anyone with that file can
+mirror to your receivers. Later shares don't ask again. If the receiver
+forgets the pairing (a reset, for example), the panel marks it "not
+paired" and asks for a PIN the next time.
+
 From a terminal:
 
 ```sh
-bin/omashare scan
+bin/omashare scan                               # "paired": true/false per receiver
+bin/omashare pair 192.168.88.63                 # prints {"event": "pin"}, then type the PIN
+bin/omashare unpair --id 9E:4D:0F:34:D4:7E      # forget a pairing
 bin/omashare mirror 192.168.88.63 --fps 30 --max-size 1920x1080 --audio tv
 bin/omashare mirror 192.168.88.63 --source monitor   # no dialog
 bin/omashare status
@@ -112,8 +122,7 @@ bin/omashare stop
 - Picture delay is about 0.26 s, measured with a millisecond clock on an
   Apple TV 4K, and the sound keeps up with it. Every audio packet is sent
   twice, one frame apart, so a lost Wi-Fi packet doesn't leave a gap.
-- The media pair-verify signs with the identity hard-coded in the pyatv
-  branch. See `media_pair_verify.py` there.
+- Pairing was verified on one Apple TV 4K (gen 2) on tvOS 27.
 
 ## Development
 

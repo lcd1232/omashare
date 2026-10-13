@@ -2,7 +2,11 @@
 
 Every command prints JSON to stdout. ``mirror`` prints one JSON object per
 line as the session progresses (``{"event": "streaming", ...}``) and runs
-until SIGTERM/SIGINT or the receiver ends the session.
+until SIGTERM/SIGINT or the receiver ends the session. ``pair`` prints
+``{"event": "pin"}`` once the receiver shows its PIN, reads the PIN from a
+line on stdin, and ends with ``{"event": "paired"}``. A receiver that is not
+paired yet makes ``mirror`` fail with ``{"event": "error", "code":
+"not-paired"}``.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ import signal
 import sys
 from pathlib import Path
 
+from omashare.devices import DeviceStore
 from omashare.sink import MODES, restore_stale
 
 
@@ -55,7 +60,72 @@ def cmd_scan(args) -> int:
     from omashare.discover import scan
 
     _restore_audio_if_idle()
-    _print(asyncio.run(scan(args.timeout)))
+    devices = asyncio.run(scan(args.timeout))
+    paired = DeviceStore().paired()
+    for device in devices:
+        device["paired"] = str(device["identifier"]).upper() in paired
+    _print(devices)
+    return 0
+
+
+def _resolve(args) -> tuple[str, str]:
+    """The receiver's (identifier, name), from the arguments or by asking it."""
+    from omashare.discover import scan
+
+    if args.id:
+        return args.id, args.name or args.host
+    found = asyncio.run(scan(3.0, hosts=[args.host]))
+    if not found:
+        raise LookupError(f"no AirPlay receiver answered at {args.host}")
+    return found[0]["identifier"], args.name or found[0]["name"]
+
+
+def cmd_pair(args) -> int:
+    from pyatv import exceptions
+
+    from omashare.pairing import pair
+
+    try:
+        device_id, name = _resolve(args)
+    except LookupError as exc:
+        _emit("error", message=str(exc))
+        return 1
+
+    async def pin() -> str:
+        _emit("pin", id=device_id, name=name)
+        line = await asyncio.get_running_loop().run_in_executor(
+            None, sys.stdin.readline
+        )
+        if not line.strip():
+            raise exceptions.AuthenticationError("pairing cancelled")
+        return line.strip()
+
+    async def run() -> int:
+        try:
+            await pair(args.host, args.port, device_id, name, pin, DeviceStore())
+        except exceptions.AuthenticationError as exc:
+            logging.getLogger(__name__).info("pairing failed: %s", exc)
+            cancelled = "cancelled" in str(exc)
+            _emit(
+                "error",
+                code="cancelled" if cancelled else "pairing-refused",
+                message="Pairing cancelled"
+                if cancelled
+                else f"{name} did not accept the PIN",
+            )
+            return 1
+        except Exception as exc:  # noqa: BLE001 - reported to the widget
+            logging.getLogger(__name__).exception("pairing failed")
+            _emit("error", message=f"{type(exc).__name__}: {exc}")
+            return 1
+        _emit("paired", id=device_id, name=name)
+        return 0
+
+    return asyncio.run(run())
+
+
+def cmd_unpair(args) -> int:
+    _print({"forgotten": DeviceStore().forget(args.id)})
     return 0
 
 
@@ -75,15 +145,25 @@ def cmd_stop(_args) -> int:
 
 
 def cmd_mirror(args) -> int:
+    from pyatv import exceptions
+
     from omashare.mirror import mirror
 
     if (pid := _read_pid()) is not None:
         _emit("error", message=f"already mirroring (pid {pid}); run 'omashare stop'")
         return 1
+    try:
+        max_w, max_h = (int(v) for v in args.max_size.split("x"))
+        device_id, name = _resolve(args)
+    except (ValueError, LookupError) as exc:
+        _emit("error", message=str(exc))
+        return 1
+    identity = DeviceStore().identity(device_id)
+    if identity is None:
+        _emit("error", code="not-paired", id=device_id, message=f"{name} is not paired yet")
+        return 2
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     PID_FILE.write_text(str(os.getpid()))
-
-    max_w, max_h = (int(v) for v in args.max_size.split("x"))
 
     async def run() -> int:
         task = asyncio.current_task()
@@ -94,6 +174,7 @@ def cmd_mirror(args) -> int:
             await mirror(
                 args.host,
                 args.port,
+                identity=identity,
                 monitor=args.monitor,
                 fps=args.fps,
                 max_size=(max_w, max_h),
@@ -104,6 +185,17 @@ def cmd_mirror(args) -> int:
             )
         except asyncio.CancelledError:
             _emit("ended", reason="stopped")
+        except exceptions.AuthenticationError as exc:
+            # The receiver no longer knows the stored identity (reset, or the
+            # pairing was removed there): it has to be paired again.
+            logging.getLogger(__name__).info("media pair-verify refused: %s", exc)
+            _emit(
+                "error",
+                code="not-paired",
+                id=device_id,
+                message=f"{name} no longer knows this computer; pair again",
+            )
+            return 2
         except Exception as exc:  # noqa: BLE001 - reported to the widget
             logging.getLogger(__name__).exception("mirror failed")
             _emit("error", message=f"{type(exc).__name__}: {exc}")
@@ -125,9 +217,22 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--timeout", type=float, default=3.0)
     p.set_defaults(func=cmd_scan)
 
+    p = sub.add_parser("pair", help="pair with a receiver (it shows a PIN)")
+    p.add_argument("host")
+    p.add_argument("--port", type=int, default=7000)
+    p.add_argument("--id", help="receiver identifier, as scan reports it")
+    p.add_argument("--name", help="receiver name, for messages")
+    p.set_defaults(func=cmd_pair)
+
+    p = sub.add_parser("unpair", help="forget the pairing with a receiver")
+    p.add_argument("--id", required=True, help="receiver identifier")
+    p.set_defaults(func=cmd_unpair)
+
     p = sub.add_parser("mirror", help="mirror the screen to a receiver")
     p.add_argument("host")
     p.add_argument("--port", type=int, default=7000)
+    p.add_argument("--id", help="receiver identifier, as scan reports it")
+    p.add_argument("--name", help="receiver name, for messages")
     p.add_argument(
         "--source",
         choices=("picker", "monitor"),
@@ -150,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("stop", help="stop the running mirror").set_defaults(func=cmd_stop)
 
     args = parser.parse_args(argv)
-    _setup_logging(args.verbose, args.command == "mirror")
+    _setup_logging(args.verbose, args.command in ("mirror", "pair"))
     return args.func(args)
 
 

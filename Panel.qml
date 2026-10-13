@@ -37,12 +37,17 @@ Panel {
   property bool scanning: false
   property string scanError: ""
 
-  // idle | choosing | connecting | pairing | streaming | stopping | error
+  // idle | choosing | connecting | pairing | streaming | stopping | error,
+  // and for the one-time PIN pairing: pin-request | pin | pin-check
   property string phase: "idle"
   property var target: null
   property string error: ""
   property string _stderrTail: ""
   property bool _userStopped: false
+  property bool _streamed: false
+  property bool _paired: false
+
+  readonly property bool pinPairing: phase === "pin-request" || phase === "pin" || phase === "pin-check"
 
   property int deviceIndex: 0
   property bool cursorActive: false
@@ -60,6 +65,9 @@ Panel {
     if (phase === "choosing") return "Choose what to share"
     if (phase === "connecting") return "Connecting"
     if (phase === "pairing") return "Pairing"
+    if (phase === "pin-request") return "Asking " + (target ? target.name : "the receiver") + " for a PIN"
+    if (phase === "pin") return "Enter the PIN shown on " + (target ? target.name : "the TV")
+    if (phase === "pin-check") return "Checking the PIN"
     if (phase === "stopping") return "Stopping"
     if (phase === "error") return "Failed"
     if (scanning) return "Searching for receivers"
@@ -87,13 +95,16 @@ Panel {
   }
 
   function start(device) {
-    if (!device || mirrorProc.running) return
+    if (!device || mirrorProc.running || pairProc.running) return
     target = device
     error = ""
     _stderrTail = ""
     _userStopped = false
+    _streamed = false
     phase = source === "picker" ? "choosing" : "connecting"
     var cmd = [helperPath, "mirror", device.address,
+               "--id", String(device.identifier || ""),
+               "--name", String(device.name || device.address),
                "--source", source,
                "--port", String(device.port || 7000),
                "--fps", String(fps),
@@ -115,9 +126,76 @@ Panel {
 
   function activate(index) {
     var device = devices[index]
-    if (!device) return
+    if (!device || pinPairing) return
     if (sharing && target && target.address === device.address) stop()
-    else if (!mirrorProc.running) start(device)
+    else if (!mirrorProc.running) {
+      if (device.paired) start(device)
+      else startPinPairing(device)
+    }
+  }
+
+  // One-time pairing: the receiver shows a PIN, which goes to the helper on
+  // stdin (never in argv), and on success the share starts right away.
+  function startPinPairing(device) {
+    if (pairProc.running || mirrorProc.running) return
+    target = device
+    error = ""
+    _paired = false
+    phase = "pin-request"
+    pairProc.command = [helperPath, "pair", device.address,
+                        "--port", String(device.port || 7000),
+                        "--id", String(device.identifier || ""),
+                        "--name", String(device.name || device.address)]
+    pairProc.running = true
+  }
+
+  function submitPin(pin) {
+    var code = String(pin || "").trim()
+    if (phase !== "pin" || !/^[0-9]{4}$/.test(code)) return
+    phase = "pin-check"
+    pairProc.write(code + "\n")
+  }
+
+  function cancelPinPairing() {
+    if (!pairProc.running) return
+    pairProc.write("\n")  // an empty line cancels
+    phase = "idle"
+  }
+
+  function markPaired(id, paired) {
+    var next = devices.map(function(d) {
+      if (String(d.identifier).toUpperCase() !== String(id).toUpperCase()) return d
+      var copy = Object.assign({}, d); copy.paired = paired; return copy
+    })
+    devices = next
+    if (target && String(target.identifier).toUpperCase() === String(id).toUpperCase()) {
+      var t = Object.assign({}, target); t.paired = paired; target = t
+    }
+  }
+
+  function handlePairEvent(line) {
+    var msg
+    try { msg = JSON.parse(line) } catch (e) { return }
+    if (msg.event === "pin") {
+      phase = "pin"
+      pinField.text = ""
+      pinField.forceActiveFocus()
+    } else if (msg.event === "paired") {
+      _paired = true
+      markPaired(msg.id, true)
+    } else if (msg.event === "error") {
+      error = msg.code === "cancelled" ? "" : String(msg.message || "Pairing failed")
+    }
+  }
+
+  function pairFinished(exitCode) {
+    if (_paired) {
+      phase = "idle"
+      notifySend("Paired", (target ? target.name : "Receiver") + " is paired with this computer")
+      start(target)
+      return
+    }
+    phase = error !== "" ? "error" : "idle"
   }
 
   function notifySend(summary, body) {
@@ -132,15 +210,17 @@ Panel {
     else if (msg.event === "pairing") phase = "pairing"
     else if (msg.event === "streaming") {
       phase = "streaming"
+      _streamed = true
       notifySend("Sharing screen", "Mirroring " + msg.monitor + " to " + (target ? target.name : "receiver")
         + (msg.audio === "off" ? " (no audio)" : ""))
     } else if (msg.event === "error") {
       error = String(msg.message || "Mirroring failed")
+      if (msg.code === "not-paired" && msg.id) markPaired(msg.id, false)
     }
   }
 
   function finished(exitCode) {
-    var wasStreaming = phase === "streaming" || phase === "stopping"
+    var wasStreaming = _streamed
     if (!_userStopped && (exitCode !== 0 || error !== "")) {
       phase = "error"
       if (error === "") error = _stderrTail || ("Helper exited with code " + exitCode)
@@ -164,6 +244,13 @@ Panel {
     repeat: true
     running: root.scanning
     onTriggered: root.dotCount = root.dotCount % 3 + 1
+  }
+
+  Process {
+    id: pairProc
+    stdinEnabled: true
+    stdout: SplitParser { onRead: function(line) { root.handlePairEvent(line) } }
+    onExited: function(exitCode) { root.pairFinished(exitCode) }
   }
 
   Process {
@@ -304,6 +391,63 @@ Panel {
           font.pixelSize: Style.font.bodySmall
         }
 
+        // One-time PIN pairing with a receiver omashare has not paired yet.
+        Column {
+          visible: root.pinPairing
+          width: parent.width
+          spacing: Style.space(8)
+
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            text: root.phase === "pin-request"
+              ? "First time with " + (root.target ? root.target.name : "this TV") + ": it will show a PIN."
+              : "Type the 4-digit PIN from the TV screen."
+            opacity: 0.7
+            color: root.bar.foreground
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Row {
+            width: parent.width
+            spacing: Style.space(6)
+
+            TextField {
+              id: pinField
+              width: parent.width - pairButton.width - cancelButton.width - parent.spacing * 2
+              foreground: root.bar.foreground
+              placeholderText: "PIN"
+              enabled: root.phase === "pin"
+              maximumLength: 4
+              inputMethodHints: Qt.ImhDigitsOnly
+              validator: RegularExpressionValidator { regularExpression: /[0-9]{0,4}/ }
+              onAccepted: root.submitPin(text)
+              Keys.onEscapePressed: root.cancelPinPairing()
+            }
+
+            Button {
+              id: pairButton
+              text: root.phase === "pin-check" ? "Checking" : "Pair"
+              foreground: root.bar.foreground
+              fontFamily: root.bar.fontFamily
+              bordered: true
+              enabled: root.phase === "pin" && pinField.text.length === 4
+              onClicked: root.submitPin(pinField.text)
+            }
+
+            Button {
+              id: cancelButton
+              text: "Cancel"
+              foreground: root.bar.foreground
+              fontFamily: root.bar.fontFamily
+              enabled: root.phase !== "pin-check"
+              onClicked: root.cancelPinPairing()
+            }
+          }
+        }
+
         Button {
           visible: root.sharing || root.phase === "stopping"
           width: parent.width
@@ -371,12 +515,13 @@ Panel {
               leftAlign: true
               iconText: current ? "󰄙" : "󰔂"
               text: modelData.name + (modelData.model ? "  ·  " + modelData.model : "")
-              tooltipText: current ? "Stop sharing" : modelData.address
+                + (modelData.paired ? "" : "  ·  not paired")
+              tooltipText: current ? "Stop sharing" : (modelData.paired ? modelData.address : "Pair with a PIN shown on the TV")
               fontSize: Style.font.bodySmall
               foreground: root.bar.foreground
               fontFamily: root.bar.fontFamily
               active: current
-              enabled: current || !root.sharing
+              enabled: current || (!root.sharing && !root.pinPairing)
               hasCursor: root.cursorActive && root.deviceIndex === index
               onClicked: root.activate(index)
               onHovered: function(h) {
