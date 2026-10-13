@@ -17,15 +17,16 @@ from typing import Callable
 
 from pyatv.protocols.airplay.mirror import (
     MirrorContext,
+    MirrorSession,
     media_pair_verify,
     run_fply_handshake,
 )
 from pyatv.protocols.airplay.mirror.framing import MirrorEncryptor
 from pyatv.support.http import http_connect
+from pyatv.support.rtsp import RtspSession
 
 from omashare import audio, capture
 from omashare.sink import AudioRoute
-from omashare.tvos27 import StreamRtspSession, Tvos27MirrorSession
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ async def mirror(
     session = None
     route = contextlib.ExitStack()
     try:
-        rtsp = StreamRtspSession(connection)
+        rtsp = RtspSession(connection)
 
         emit("pairing")
         pair_secret = await media_pair_verify(rtsp)
@@ -139,7 +140,7 @@ async def mirror(
 
         # Routed only now, so a failed handshake never touches local audio.
         source = route.enter_context(AudioRoute(audio_mode))
-        session = Tvos27MirrorSession(
+        session = MirrorSession(
             rtsp,
             None,
             ctx,
