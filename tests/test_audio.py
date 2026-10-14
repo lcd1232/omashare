@@ -74,3 +74,32 @@ def test_parec_captures_44100_stereo_s16():
     assert argv[0] == "parec"
     for flag in ("--device=foo.monitor", "--format=s16le", "--rate=44100", "--channels=2", "--raw"):
         assert flag in argv
+
+
+class _NoEncoder:
+    def __init__(self, bitrate):
+        pass
+
+    def encode(self, pcm):
+        return b""
+
+    def close(self):
+        pass
+
+
+@pytest.mark.parametrize(
+    "argv, code",
+    [
+        (["no-such-parec-binary"], 127),
+        (["true"], 0),  # parec ended by itself: its status
+        (["false"], 1),
+    ],
+)
+def test_main_reports_parec_status(monkeypatch, capsys, argv, code):
+    monkeypatch.setattr(audio, "parec_argv", lambda source: argv)
+    monkeypatch.setattr(audio, "EldEncoder", _NoEncoder)
+    monkeypatch.setattr(audio, "_die_with_parent", lambda *a: None)
+    monkeypatch.setattr(audio.signal, "signal", lambda *a: None)
+    assert audio.main(["--source", "x.monitor"]) == code
+    if code == 127:
+        assert "parec is not installed" in capsys.readouterr().err

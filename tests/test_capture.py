@@ -115,7 +115,7 @@ def test_pick_source_reports_other_failures_as_errors(tmp_path, monkeypatch):
 
 def test_capture_reports_a_missing_recorder(monkeypatch, capsys):
     monkeypatch.setattr(capture, "pipeline_argv", lambda *a: (["no-such-gsr-binary"], ["cat"]))
-    monkeypatch.setattr(capture, "_die_with_parent", lambda: None)
+    monkeypatch.setattr(capture, "_die_with_parent", lambda *a: None)
     assert capture.main(["--target", "eDP-1"]) == 127
     assert "not installed" in capsys.readouterr().err
 

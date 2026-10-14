@@ -17,7 +17,7 @@ import subprocess
 import sys
 from typing import BinaryIO, Iterator
 
-from omashare.capture import _die_with_parent
+from omashare.capture import _die_with_parent, child_setup
 
 SAMPLE_RATE = 44100
 CHANNELS = 2
@@ -187,13 +187,25 @@ def main(argv: list[str] | None = None) -> int:
 
     _die_with_parent()
     encoder = EldEncoder(args.bitrate)
-    parec = subprocess.Popen(
-        parec_argv(args.source),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        preexec_fn=_die_with_parent,
-    )
-    signal.signal(signal.SIGTERM, lambda *_: parec.kill())
+    try:
+        parec = subprocess.Popen(
+            parec_argv(args.source),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            preexec_fn=child_setup(),
+        )
+    except FileNotFoundError:
+        encoder.close()
+        print("omashare: parec is not installed", file=sys.stderr)
+        return 127
+    stopping = False
+
+    def _stop(*_):
+        nonlocal stopping
+        stopping = True
+        parec.kill()
+
+    signal.signal(signal.SIGTERM, _stop)
     assert parec.stdout is not None
     out = sys.stdout.buffer
     try:
@@ -203,11 +215,15 @@ def main(argv: list[str] | None = None) -> int:
                 out.write(frame_record(frame))
                 out.flush()
     except BrokenPipeError:
-        pass
+        stopping = True  # the session stopped reading: a normal end
     finally:
-        parec.kill()
+        code = parec.poll()
+        if code is None:
+            parec.kill()
+            parec.wait()
         encoder.close()
-    return parec.wait()
+    # parec's own status when it ended by itself; 0 when we stopped it.
+    return 0 if stopping or code is None else code
 
 
 if __name__ == "__main__":

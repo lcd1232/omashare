@@ -137,7 +137,7 @@ async def mirror(
         ctx.audio_ekey = handshake.audio_ekey
 
         # Routed only now, so a failed handshake never touches local audio.
-        source = route.enter_context(AudioRoute(audio_mode))
+        audio_source = route.enter_context(AudioRoute(audio_mode))
         session = MirrorSession(
             rtsp,
             None,
@@ -146,7 +146,7 @@ async def mirror(
             video_command=capture.video_command(
                 target, fps, max_size[0], max_size[1], cursor, portal_token
             ),
-            audio_command=audio.audio_command(source) if source else None,
+            audio_command=audio.audio_command(audio_source) if audio_source else None,
             pair_secret=pair_secret,
             timing_port=timing_port,
         )

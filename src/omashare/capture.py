@@ -4,28 +4,30 @@ The mirror session runs ``video_command`` through a shell and SIGKILLs it on
 stop, which would orphan a plain ``gsr | ffmpeg`` pipeline. So the command is
 ``exec python -m omashare.capture ...``: this module becomes that process,
 starts the pipeline with PR_SET_PDEATHSIG, and the children die with it.
+SIGKILL, not SIGTERM: on SIGTERM both tools try to flush a trailer into a
+pipe nobody reads any more and hang; a live stream has nothing to finalize.
 
 The source is a monitor, or whatever was picked in the desktop's screen-share
 dialog (xdg-desktop-portal; on Omarchy, hyprland-preview-share-picker).
 :func:`pick_source` shows that dialog and learns the picked source's size;
 the portal restore token it leaves behind lets the session's own capture
 reopen the same source without asking again.
-SIGKILL, not SIGTERM: on SIGTERM both tools try to flush a trailer into a
-pipe nobody reads any more and hang; a live stream has nothing to finalize.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import functools
 import json
+import os
 import shlex
 import signal
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from pyatv.protocols.airplay.mirror import pacer
 
@@ -224,8 +226,17 @@ async def pick_source(
         stderr_task.cancel()
 
 
-def _die_with_parent() -> None:
-    die_with_parent(signal.SIGKILL)
+def _die_with_parent(parent: Optional[int] = None) -> None:
+    die_with_parent(signal.SIGKILL, parent)
+
+
+def child_setup() -> Callable[[], None]:
+    """A ``preexec_fn`` that ties a child to this process.
+
+    It names this process as the parent from here, before the fork: a parent
+    killed before the child's prctl is then still caught.
+    """
+    return functools.partial(_die_with_parent, os.getpid())
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -246,14 +257,14 @@ def main(argv: list[str] | None = None) -> int:
     # (pick_source) reads them to tell a cancelled dialog from a failure.
     try:
         gsr = subprocess.Popen(
-            gsr_argv, stdout=subprocess.PIPE, preexec_fn=_die_with_parent
+            gsr_argv, stdout=subprocess.PIPE, preexec_fn=child_setup()
         )
     except FileNotFoundError:
         print("omashare: gpu-screen-recorder is not installed", file=sys.stderr)
         return 127
     try:
         ffmpeg = subprocess.Popen(
-            ffmpeg_argv, stdin=gsr.stdout, preexec_fn=_die_with_parent
+            ffmpeg_argv, stdin=gsr.stdout, preexec_fn=child_setup()
         )
     except FileNotFoundError:
         gsr.kill()
