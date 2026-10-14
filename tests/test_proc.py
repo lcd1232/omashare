@@ -29,3 +29,30 @@ def test_fallback_runtime_dir_refuses_a_shared_directory(monkeypatch, tmp_path):
     monkeypatch.setattr(proc, "Path", lambda _: shared)
     with pytest.raises(RuntimeError):
         proc.runtime_dir()
+
+
+class _FakeLibc:
+    def __init__(self):
+        self.calls = []
+
+    def prctl(self, *args):
+        self.calls.append(args)
+        return 0
+
+
+@pytest.mark.parametrize("parents, killed", [((100, 100), []), ((100, 1), [15])])
+def test_die_with_parent(monkeypatch, parents, killed):
+    """Sets PDEATHSIG; signals itself if the parent was already gone.
+
+    An orphan is re-parented to init or a subreaper, so the check compares
+    with the parent seen before the prctl rather than with pid 1.
+    """
+    libc = _FakeLibc()
+    ppids = iter(parents)
+    sent = []
+    monkeypatch.setattr(proc.ctypes, "CDLL", lambda *a, **k: libc)
+    monkeypatch.setattr(proc.os, "getppid", lambda: next(ppids))
+    monkeypatch.setattr(proc.os, "kill", lambda pid, sig: sent.append(sig))
+    proc.die_with_parent(15)
+    assert libc.calls == [(proc.PR_SET_PDEATHSIG, 15)]
+    assert sent == killed

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import os
 import stat
 from pathlib import Path
@@ -61,3 +62,19 @@ def is_running(pid: object, start: object = None) -> bool:
     if current is None:
         return False
     return start is None or current == start
+
+
+PR_SET_PDEATHSIG = 1
+
+
+def die_with_parent(sig: int) -> None:
+    """Have the kernel send *sig* to this process when its parent exits.
+
+    If the parent had already exited before the prctl, the process has been
+    re-parented (to init, or to a subreaper such as ``systemd --user``) and
+    no signal would ever come, so it is sent right away.
+    """
+    parent = os.getppid()
+    ctypes.CDLL(None, use_errno=True).prctl(PR_SET_PDEATHSIG, int(sig))
+    if os.getppid() != parent:
+        os.kill(os.getpid(), sig)

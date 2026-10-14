@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import ctypes
 import json
 import shlex
 import signal
@@ -31,8 +30,8 @@ from typing import Optional
 from pyatv.protocols.airplay.mirror import pacer
 
 from omashare.h264 import find_sps, sps_dimensions
+from omashare.proc import die_with_parent
 
-PR_SET_PDEATHSIG = 1
 
 #: gpu-screen-recorder's capture target for the screen-share portal.
 PORTAL = "portal"
@@ -226,8 +225,7 @@ async def pick_source(
 
 
 def _die_with_parent() -> None:
-    libc = ctypes.CDLL(None, use_errno=True)
-    libc.prctl(PR_SET_PDEATHSIG, int(signal.SIGKILL))
+    die_with_parent(signal.SIGKILL)
 
 
 def main(argv: list[str] | None = None) -> int:

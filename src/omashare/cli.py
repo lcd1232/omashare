@@ -23,9 +23,12 @@ import signal
 import sys
 from pathlib import Path
 
+from pyatv import exceptions
+
+from omashare import discover, firewall, mirror, pairing
 from omashare.devices import DeviceStore
 from omashare.firewall import DEFAULT_TIMING_PORT
-from omashare.proc import is_running, runtime_dir, this_process
+from omashare.proc import die_with_parent, is_running, runtime_dir, this_process
 from omashare.sink import MODES, restore_stale
 
 PID_FILE = runtime_dir() / "omashare.pid"
@@ -57,22 +60,6 @@ def _read_pid() -> int | None:
     return owner["pid"] if owner else None
 
 
-def _die_with_parent() -> None:
-    """SIGTERM this process when its parent dies.
-
-    The bar widget runs the helper through uv; if the widget's shell is
-    restarted, uv may be killed outright, and the mirror would otherwise keep
-    streaming (and keep local sound on the null sink) with no UI to stop it.
-    SIGTERM ends it cleanly: TEARDOWN, and the audio route restored.
-    """
-    import ctypes
-
-    pr_set_pdeathsig = 1
-    ctypes.CDLL(None, use_errno=True).prctl(pr_set_pdeathsig, int(signal.SIGTERM))
-    if os.getppid() == 1:  # the parent was already gone before the prctl
-        os.kill(os.getpid(), signal.SIGTERM)
-
-
 def _restore_audio_if_idle() -> None:
     """Undo a null sink left by a killed mirror, so local sound comes back
     even if sharing is never started again. Never while a mirror runs."""
@@ -81,10 +68,8 @@ def _restore_audio_if_idle() -> None:
 
 
 def cmd_scan(args) -> int:
-    from omashare.discover import scan
-
     _restore_audio_if_idle()
-    devices = asyncio.run(scan(args.timeout))
+    devices = asyncio.run(discover.scan(args.timeout))
     paired = DeviceStore().paired()
     for device in devices:
         device["paired"] = str(device["identifier"]).upper() in paired
@@ -96,21 +81,15 @@ def cmd_scan(args) -> int:
 
 def _resolve(args) -> tuple[str, str]:
     """The receiver's (identifier, name), from the arguments or by asking it."""
-    from omashare.discover import scan
-
     if args.id:
         return args.id, args.name or args.host
-    found = asyncio.run(scan(3.0, hosts=[args.host]))
+    found = asyncio.run(discover.scan(3.0, hosts=[args.host]))
     if not found:
         raise LookupError(f"no AirPlay receiver answered at {args.host}")
     return found[0]["identifier"], args.name or found[0]["name"]
 
 
 def cmd_pair(args) -> int:
-    from pyatv import exceptions
-
-    from omashare.pairing import pair
-
     try:
         device_id, name = _resolve(args)
     except LookupError as exc:
@@ -132,7 +111,7 @@ def cmd_pair(args) -> int:
 
     async def run() -> int:
         try:
-            await pair(args.host, args.port, device_id, name, pin, DeviceStore())
+            await pairing.pair(args.host, args.port, device_id, name, pin, DeviceStore())
         except exceptions.AuthenticationError as exc:
             logging.getLogger(__name__).info("pairing failed: %s", exc)
             if "cancelled" in str(exc):
@@ -192,17 +171,11 @@ def cmd_stop(_args) -> int:
 
 
 def cmd_firewall(args) -> int:
-    from omashare import firewall
-
     _print(firewall.check(args.timing_port))
     return 0
 
 
 def cmd_mirror(args) -> int:
-    from pyatv import exceptions
-
-    from omashare.mirror import mirror
-
     if (pid := _read_pid()) is not None:
         _emit("error", message=f"already mirroring (pid {pid}); run 'omashare stop'")
         return 1
@@ -221,13 +194,16 @@ def cmd_mirror(args) -> int:
     )
 
     async def run() -> int:
-        _die_with_parent()
+        # The widget runs the helper through uv, which a shell restart may kill
+        # outright; the share would then go on with no UI to stop it. SIGTERM
+        # ends it cleanly: TEARDOWN, and the audio route restored.
+        die_with_parent(signal.SIGTERM)
         task = asyncio.current_task()
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, task.cancel)
         try:
-            await mirror(
+            await mirror.mirror(
                 args.host,
                 args.port,
                 identity=identity,
