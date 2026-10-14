@@ -31,12 +31,20 @@ _LOGGER = logging.getLogger(__name__)
 #: (HomePods, AirPlay speakers) lack it.
 FEATURE_SCREEN = 1 << 7
 
-_ESCAPE = re.compile(rb"\\(\d{3})")
+_ESCAPE = re.compile(rb"\\(\d{3}|.)", re.DOTALL)
+
+
+def _unescape_one(match: re.Match) -> bytes:
+    code = match.group(1)
+    if code.isdigit() and int(code) < 256:
+        return bytes([int(code)])
+    return code  # an escaped dot or backslash stands for itself
 
 
 def _unescape(text: str) -> str:
-    """Undo avahi's ``\\DDD`` (decimal byte) escapes, e.g. ``\\032`` for a space."""
-    raw = _ESCAPE.sub(lambda m: bytes([int(m.group(1))]), text.encode("utf-8"))
+    """Undo avahi's escapes: ``\\DDD`` (a decimal byte, e.g. ``\\032`` for a
+    space), and ``\\.`` / ``\\\\`` for a dot and a backslash in the name."""
+    raw = _ESCAPE.sub(_unescape_one, text.encode("utf-8"))
     return raw.decode("utf-8", errors="replace")
 
 
@@ -140,9 +148,11 @@ def parse_avahi(output: str) -> list[dict]:
             continue
         device_id = (txt.get("deviceid") or parts[6]).upper()
         try:
-            address = ip_address(parts[7].split("%")[0])
+            address = ip_address(parts[7])
         except ValueError:
             continue
+        if address.is_link_local:
+            continue  # unreachable without the interface, which avahi omits
         device = {
             "name": _unescape(parts[3]),
             "address": str(address),

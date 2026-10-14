@@ -96,3 +96,28 @@ def test_model_names(raw, name):
 )
 def test_device_kinds(raw, kind):
     assert discover.device_kind(raw) == kind
+
+
+@pytest.mark.parametrize(
+    "escaped, name",
+    [
+        (r"Mikhail\226\128\153s\032MacBook", "Mikhail’s MacBook"),
+        (r"Den\.TV", "Den.TV"),
+        (r"Box\\999", "Box\\999"),  # an escaped backslash, then digits: no crash
+    ],
+)
+def test_receiver_names_are_unescaped(escaped, name):
+    txt = '"deviceid=AA:BB" "features=0x80" "model=AppleTV11,1"'
+    line = ";".join(["=", "wlan0", "IPv4", escaped, "_airplay._tcp", "local", "h.local", "192.0.2.1", "7000", txt])
+    assert discover.parse_avahi(line)[0]["name"] == name
+
+
+def test_link_local_addresses_are_skipped():
+    txt = '"deviceid=AA:BB" "features=0x80" "model=AppleTV11,1"'
+    rows = [
+        ["=", "wlan0", "IPv6", "Den", "_airplay._tcp", "local", "h.local", "fe80::1", "7000", txt],
+        ["=", "wlan0", "IPv4", "Den", "_airplay._tcp", "local", "h.local", "192.0.2.1", "7000", txt],
+    ]
+    found = discover.parse_avahi("\n".join(";".join(r) for r in rows))
+    assert [d["address"] for d in found] == ["192.0.2.1"]
+    assert discover.parse_avahi(";".join(rows[0])) == []
