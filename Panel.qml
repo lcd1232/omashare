@@ -33,7 +33,7 @@ Panel {
     var v = String(setting("audio", "tv"))
     return ["tv", "both", "off"].indexOf(v) >= 0 ? v : "tv"
   }
-  readonly property string source: setting("source", "picker") === "monitor" ? "monitor" : "picker"
+  readonly property string source: setting("shareSource", "picker") === "monitor" ? "monitor" : "picker"
   readonly property bool showCursor: boolSetting("showCursor", true)
   readonly property bool notify: boolSetting("notify", true)
   readonly property bool dndWhileSharing: boolSetting("dndWhileSharing", true)
@@ -87,6 +87,8 @@ Panel {
 
   // Save one setting into this widget's shell.json entry, as the first-party
   // panels do; the shell then hands the new values back through `settings`.
+  // The bar reads some entry keys itself, so settings must not use them:
+  // `source`, `type` and `exec` turn the entry into a custom module.
   function saveSetting(key, value) {
     if (!bar || !bar.shell || typeof bar.shell.updateEntryInline !== "function") return
     var entry = { id: moduleName }
@@ -887,7 +889,7 @@ Panel {
               { value: "monitor", label: "Focused screen" }
             ]
             value: root.source
-            onChanged: function(v) { root.saveSetting("source", v) }
+            onChanged: function(v) { root.saveSetting("shareSource", v) }
           }
 
           Toggle {

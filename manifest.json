@@ -31,13 +31,13 @@
       "audio": "tv",
       "showCursor": true,
       "notify": true,
-      "source": "picker",
+      "shareSource": "picker",
       "timingPort": 47010,
       "dndWhileSharing": true
     },
     "schema": [
       {
-        "key": "source",
+        "key": "shareSource",
         "type": "enum",
         "label": "What to share",
         "description": "picker: choose a screen, window or region in the screen-share dialog each time. monitor: share the focused monitor without asking.",
