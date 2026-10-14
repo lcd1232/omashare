@@ -26,8 +26,10 @@ Panel {
   }
   readonly property int fps: {
     var v = Math.round(Number(setting("fps", 30)))
-    return v >= 15 && v <= 60 ? v : 30
+    return v >= 10 && v <= 60 ? v : 30
   }
+  // Frame rates offered as one click; anything else is "Custom".
+  readonly property var fpsPresets: [24, 30, 60]
   readonly property string maxResolution: String(setting("maxResolution", "1920x1080"))
   readonly property string audioMode: {
     var v = String(setting("audio", "tv"))
@@ -83,6 +85,9 @@ Panel {
 
   // The settings view replaces the receiver list while open.
   property bool settingsOpen: false
+  // Custom picked while the frame rate is still a preset: show the field.
+  property bool fpsCustomOpen: false
+  readonly property bool fpsCustom: fpsCustomOpen || fpsPresets.indexOf(fps) < 0
 
   // Save one setting into this widget's shell.json entry, as the first-party
   // panels do; the shell then hands the new values back through `settings`.
@@ -412,6 +417,7 @@ Panel {
     if (!opened) return
     cursorActive = false
     settingsOpen = false
+    fpsCustomOpen = false
     checkStatus()
     checkFirewall()
     if (!sharing) scan()
@@ -822,36 +828,35 @@ Panel {
             fontFamily: root.bar.fontFamily
           }
 
-          Item {
-            width: parent.width
-            implicitHeight: fpsLabel.implicitHeight
-            Text {
-              id: fpsLabel
-              text: "Frame rate"
-              color: root.bar.foreground
-              font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.body
-            }
-            Text {
-              anchors.right: parent.right
-              text: Math.round(fpsSlider.liveValue) + " fps"
-              color: Qt.darker(root.bar.foreground, 1.4)
-              font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.body
+          Text {
+            text: "Frame rate"
+            color: root.bar.foreground
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.body
+          }
+          ButtonGroup {
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            fontSize: Style.font.bodySmall
+            options: root.fpsPresets.map(function(f) { return { value: String(f), label: f + " fps" } })
+              .concat([{ value: "custom", label: "Custom" }])
+            value: root.fpsCustom ? "custom" : String(root.fps)
+            onChanged: function(v) {
+              if (v === "custom") { root.fpsCustomOpen = true; return }
+              root.fpsCustomOpen = false
+              root.saveSetting("fps", Number(v))
             }
           }
-
-          PanelSlider {
-            id: fpsSlider
-            width: parent.width
-            bar: root.bar
-            minimum: 15
-            maximum: 60
-            step: 5
-            integer: true
-            tickCount: 10
+          NumberField {
+            visible: root.fpsCustom
+            label: "Frames per second (10–60)"
+            from: 10
+            to: 60
             value: root.fps
-            onReleased: function(v) { root.saveSetting("fps", Math.round(v)) }
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            fontSize: Style.font.bodySmall
+            onModified: function(v) { root.saveSetting("fps", v) }
           }
 
           Text {

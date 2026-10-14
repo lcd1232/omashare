@@ -112,8 +112,8 @@ o.bind("SUPER + CTRL + A", "Omashare", "omarchy-shell shell toggle lcd1232.omash
 
 ## Usage
 
-The gear button in the panel's header opens its settings: frame rate (15–60
-fps), maximum resolution, what to share, audio, and Do Not Disturb. Changes
+The gear button in the panel's header opens its settings: frame rate (24, 30,
+60 or a custom 10–60 fps), maximum resolution, what to share, audio, and Do Not Disturb. Changes
 apply to the next share.
 
 Receivers you've paired with are listed first. Once the picture is up, Do

@@ -51,9 +51,9 @@
         "type": "integer",
         "label": "Frame rate",
         "description": "Frames per second sent to the receiver.",
-        "min": 15,
+        "min": 10,
         "max": 60,
-        "step": 5,
+        "step": 1,
         "defaultValue": 30
       },
       {
