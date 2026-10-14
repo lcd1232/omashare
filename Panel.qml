@@ -35,7 +35,6 @@ Panel {
   }
   readonly property string source: setting("shareSource", "picker") === "monitor" ? "monitor" : "picker"
   readonly property bool showCursor: boolSetting("showCursor", true)
-  readonly property bool notify: boolSetting("notify", true)
   readonly property bool dndWhileSharing: boolSetting("dndWhileSharing", true)
   readonly property int timingPort: {
     var v = Number(setting("timingPort", 47010))
@@ -327,7 +326,7 @@ Panel {
   }
 
   function notifySend(summary, body) {
-    if (notify) Quickshell.execDetached(["notify-send", "-a", "Omashare", "-i", "video-display", summary, body || ""])
+    Quickshell.execDetached(["notify-send", "-a", "Omashare", "-i", "video-display", summary, body || ""])
   }
 
   function handleEvent(line) {
@@ -934,15 +933,6 @@ Panel {
             fontFamily: root.bar.fontFamily
             titleSize: Style.font.body
             onClicked: root.saveSetting("dndWhileSharing", !root.dndWhileSharing)
-          }
-          Toggle {
-            width: parent.width
-            label: "Start and stop notifications"
-            checked: root.notify
-            foreground: root.bar.foreground
-            fontFamily: root.bar.fontFamily
-            titleSize: Style.font.body
-            onClicked: root.saveSetting("notify", !root.notify)
           }
 
           Text {

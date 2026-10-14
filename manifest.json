@@ -30,7 +30,6 @@
       "maxResolution": "1920x1080",
       "audio": "tv",
       "showCursor": true,
-      "notify": true,
       "shareSource": "picker",
       "timingPort": 47010,
       "dndWhileSharing": true
@@ -85,12 +84,6 @@
         "key": "showCursor",
         "type": "boolean",
         "label": "Show the mouse cursor",
-        "defaultValue": true
-      },
-      {
-        "key": "notify",
-        "type": "boolean",
-        "label": "Notify when sharing starts and stops",
         "defaultValue": true
       },
       {
