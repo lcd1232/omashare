@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -755,18 +756,37 @@ Panel {
             font.pixelSize: Style.font.bodySmall
           }
 
-          Repeater {
+          // Scrolls past a few receivers instead of growing off the screen;
+          // a ListView keeps the keyboard cursor's row in view, as in the
+          // Bluetooth panel.
+          ListView {
+            id: deviceList
+            width: parent.width
+            height: Math.min(contentHeight, Style.space(400))
+            spacing: Style.space(6)
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            interactive: contentHeight > height
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
             model: root.devices
+            currentIndex: root.cursorActive ? root.deviceIndex : -1
+            // Deferred: the model is replaced on every scan.
+            onCurrentIndexChanged: if (currentIndex >= 0) Qt.callLater(keepCurrentVisible)
+            function keepCurrentVisible() {
+              if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
+            }
+
             // Two lines, like the Bluetooth panel's device rows: the name, and
             // the model or state below it in a smaller, dimmer line.
-            CursorSurface {
+            delegate: CursorSurface {
               id: deviceRow
               required property var modelData
               required property int index
               readonly property bool usable: current || (!root.sharing && !root.pinPairing)
               readonly property string detail: current ? "Sharing"
                 : (modelData.paired ? (modelData.model || modelData.address) : "Not paired")
-              width: parent.width
+              width: ListView.view.width
               implicitHeight: rowContent.implicitHeight + Style.spacing.rowPaddingX
               opacity: usable ? 1.0 : 0.4
               hasCursor: usable && root.cursorActive && root.deviceIndex === index
