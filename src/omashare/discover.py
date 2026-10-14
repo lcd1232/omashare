@@ -59,9 +59,10 @@ def _features(value: str) -> int:
 
 #: Mac model identifiers to Apple's names, vendored from
 #: github.com/kyle-seongwoo-jun/apple-device-identifiers (MIT, see
-#: data/LICENSE.mac-device-identifiers) at b7b3acf2d1c1. It is scraped from
-#: Apple's "Identify your Mac model" pages; pyatv only knows Apple TVs,
-#: HomePods and AirPorts.
+#: data/LICENSE.mac-device-identifiers), branch scrap/apple-websites at
+#: 169d0a2dc9da: main lags the 2026 models. It is scraped from Apple's
+#: "Identify your Mac model" pages; pyatv only knows Apple TVs, HomePods and
+#: AirPorts.
 _MAC_NAMES = Path(__file__).parent / "data" / "mac-device-identifiers.json"
 
 #: Families by identifier prefix, for Macs newer than the table. Since 2021
@@ -100,6 +101,20 @@ def _mac_model(raw: str) -> Optional[str]:
     return None
 
 
+def device_kind(raw: str) -> str:
+    """What a receiver is, for its icon: tv, laptop, imac, desktop or other."""
+    if raw.startswith("AppleTV"):
+        return "tv"
+    name = _mac_model(raw) or ""
+    if name.startswith("MacBook"):
+        return "laptop"
+    if name.startswith("iMac"):
+        return "imac"
+    if name.startswith(("Mac mini", "Mac Studio", "Mac Pro")):
+        return "desktop"
+    return "other"
+
+
 def _model_str(raw: str) -> str:
     if not raw:
         return ""
@@ -134,6 +149,7 @@ def parse_avahi(output: str) -> list[dict]:
             "port": int(parts[8]) if parts[8].isdigit() else 7000,
             "identifier": device_id,
             "model": _model_str(txt.get("model", "")),
+            "kind": device_kind(txt.get("model", "")),
         }
         known = found.get(device_id)
         if known is None or (address.version == 4 and ":" in known["address"]):
@@ -179,6 +195,7 @@ async def _pyatv(timeout: float, hosts: Optional[list[str]]) -> list[dict]:
                 "port": service.port,
                 "identifier": conf.identifier,
                 "model": conf.device_info.model_str,
+                "kind": device_kind(conf.device_info.raw_model or ""),
             }
         )
     devices.sort(key=lambda d: d["name"].lower())

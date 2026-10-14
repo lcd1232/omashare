@@ -21,9 +21,9 @@ def test_parses_names_models_and_merges_ip_versions():
     devices = discover.parse_avahi(AVAHI)
     assert devices == [
         {"name": "Bedroom", "address": "192.168.88.63", "port": 7000,
-         "identifier": "9E:4D:0F:34:D4:7E", "model": "Apple TV 4K (gen 2)"},
+         "identifier": "9E:4D:0F:34:D4:7E", "model": "Apple TV 4K (gen 2)", "kind": "tv"},
         {"name": "Mikhail’s MacBook Pro", "address": "192.168.88.34", "port": 7000,
-         "identifier": "F2:79:31:8C:22:62", "model": "MacBook Pro (14-inch, Nov 2023)"},
+         "identifier": "F2:79:31:8C:22:62", "model": "MacBook Pro (14-inch, Nov 2023)", "kind": "laptop"},
     ]
 
 
@@ -76,3 +76,23 @@ def test_scan_for_a_host_uses_the_avahi_entry(monkeypatch):
 )
 def test_model_names(raw, name):
     assert discover._model_str(raw) == name
+
+
+@pytest.mark.parametrize(
+    "raw, kind",
+    [
+        ("AppleTV11,1", "tv"),
+        ("Mac15,6", "laptop"),  # MacBook Pro
+        ("MacBookAir10,1", "laptop"),
+        ("iMac21,1", "imac"),
+        ("Mac16,10", "desktop"),  # Mac mini
+        ("Mac13,1", "desktop"),  # Mac Studio
+        ("Mac14,8", "desktop"),  # Mac Pro
+        ("Mac17,3", "laptop"),  # MacBook Air (13-inch, M5), 2026
+        ("MacBookPro99,1", "laptop"),  # newer than the table
+        ("Mac99,1", "other"),
+        ("", "other"),
+    ],
+)
+def test_device_kinds(raw, kind):
+    assert discover.device_kind(raw) == kind

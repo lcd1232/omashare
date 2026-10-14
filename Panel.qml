@@ -89,6 +89,15 @@ Panel {
     return devices.length ? devices.length + (devices.length === 1 ? " receiver" : " receivers") : "Not sharing"
   }
 
+  // Nerd Font (Material Design) glyphs by the helper's device kind.
+  function kindIcon(kind) {
+    if (kind === "tv") return "󰟴"       // md-television_classic
+    if (kind === "laptop") return "󰌢"   // md-laptop
+    if (kind === "imac") return "󰇄"     // md-desktop_mac
+    if (kind === "desktop") return "󰇅"  // md-desktop_tower
+    return "󰍹"                          // md-monitor
+  }
+
   function scan() {
     if (scanProc.running) return
     scanning = true
@@ -734,10 +743,13 @@ Panel {
                 Text {
                   id: rowIcon
                   textFormat: Text.PlainText
-                  text: deviceRow.current ? "󰄙" : "󰔂"
+                  text: deviceRow.current ? "󰄙" : root.kindIcon(deviceRow.modelData.kind)
                   color: root.bar.foreground
                   font.family: root.bar.fontFamily
                   font.pixelSize: Style.font.heading
+                  // Glyphs differ in width; a fixed slot keeps the names aligned.
+                  width: Style.font.heading * 1.3
+                  horizontalAlignment: Text.AlignHCenter
                   anchors.left: parent.left
                   anchors.verticalCenter: parent.verticalCenter
                 }
