@@ -11,10 +11,13 @@ pyatv's scanner is used.
 from __future__ import annotations
 
 import asyncio
+import functools
+import json
 import logging
 import re
 import shutil
 from ipaddress import ip_address
+from pathlib import Path
 from typing import Optional
 
 import pyatv
@@ -54,9 +57,55 @@ def _features(value: str) -> int:
         return 0
 
 
+#: Mac model identifiers to Apple's names, vendored from
+#: github.com/kyle-seongwoo-jun/apple-device-identifiers (MIT, see
+#: data/LICENSE.mac-device-identifiers) at b7b3acf2d1c1. It is scraped from
+#: Apple's "Identify your Mac model" pages; pyatv only knows Apple TVs,
+#: HomePods and AirPorts.
+_MAC_NAMES = Path(__file__).parent / "data" / "mac-device-identifiers.json"
+
+#: Families by identifier prefix, for Macs newer than the table. Since 2021
+#: every new Mac is ``MacNN,N``, which says only "Mac".
+_MAC_FAMILIES = (
+    ("MacBookPro", "MacBook Pro"),
+    ("MacBookAir", "MacBook Air"),
+    ("MacBook", "MacBook"),
+    ("Macmini", "Mac mini"),
+    ("MacPro", "Mac Pro"),
+    ("iMacPro", "iMac Pro"),
+    ("iMac", "iMac"),
+    ("Mac", "Mac"),
+)
+
+
+@functools.cache
+def _mac_names() -> dict:
+    try:
+        return json.loads(_MAC_NAMES.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        _LOGGER.warning("cannot read %s", _MAC_NAMES)
+        return {}
+
+
+def _mac_model(raw: str) -> Optional[str]:
+    """Apple's name for a Mac identifier such as ``Mac15,6``, else None."""
+    name = _mac_names().get(raw)
+    if isinstance(name, list):  # one identifier, several models
+        return " or ".join(name)
+    if isinstance(name, str):
+        return name
+    for prefix, family in _MAC_FAMILIES:
+        if re.fullmatch(rf"{prefix}\d+,\d+", raw):
+            return family
+    return None
+
+
 def _model_str(raw: str) -> str:
     if not raw:
         return ""
+    mac = _mac_model(raw)
+    if mac:
+        return mac
     return DeviceInfo({DeviceInfo.MODEL: lookup_model(raw), DeviceInfo.RAW_MODEL: raw}).model_str
 
 

@@ -78,6 +78,12 @@ networks only counts too. The port is a setting (`timingPort`, or
 If a receiver accepts the session and then stops answering, the panel says
 the timing port may be blocked.
 
+## Credits
+
+Mac model names come from
+[apple-device-identifiers](https://github.com/kyle-seongwoo-jun/apple-device-identifiers)
+by Kyle Seongwoo Jun (MIT), vendored in `src/omashare/data/`.
+
 ## Requirements
 
 - Omarchy with the Quickshell-based shell; `gpu-screen-recorder`, `ffmpeg`,

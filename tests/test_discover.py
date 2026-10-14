@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from omashare import discover
 
 TXT_TV = '"acl=0" "deviceid=9E:4D:0F:34:D4:7E" "features=0x4A7FDFD5,0x3C175FDE" "model=AppleTV11,1"'
@@ -21,7 +23,7 @@ def test_parses_names_models_and_merges_ip_versions():
         {"name": "Bedroom", "address": "192.168.88.63", "port": 7000,
          "identifier": "9E:4D:0F:34:D4:7E", "model": "Apple TV 4K (gen 2)"},
         {"name": "Mikhail’s MacBook Pro", "address": "192.168.88.34", "port": 7000,
-         "identifier": "F2:79:31:8C:22:62", "model": "Mac15,6"},
+         "identifier": "F2:79:31:8C:22:62", "model": "MacBook Pro (14-inch, Nov 2023)"},
     ]
 
 
@@ -58,3 +60,19 @@ def test_scan_for_a_host_uses_the_avahi_entry(monkeypatch):
     monkeypatch.setattr(discover, "_pyatv", must_not)
     found = asyncio.run(discover.scan(hosts=["192.168.88.34"]))
     assert [d["identifier"] for d in found] == ["F2:79:31:8C:22:62"]
+
+
+@pytest.mark.parametrize(
+    "raw, name",
+    [
+        ("Mac15,6", "MacBook Pro (14-inch, Nov 2023)"),
+        ("MacBookPro18,3", "MacBook Pro (14-inch, 2021)"),
+        ("Mac14,8", "Mac Pro (2023) or Mac Pro (Rack, 2023)"),
+        ("Mac99,1", "Mac"),  # newer than the table
+        ("MacBookAir99,1", "MacBook Air"),
+        ("iMac99,1", "iMac"),
+        ("AppleTV11,1", "Apple TV 4K (gen 2)"),  # pyatv's table
+    ],
+)
+def test_model_names(raw, name):
+    assert discover._model_str(raw) == name
