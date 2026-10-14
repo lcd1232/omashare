@@ -65,10 +65,19 @@ Panel {
   property bool commandCopied: false
 
   // Do Not Disturb while sharing. Turned off again only if this panel turned
-  // it on; a DND the user had set stays.
+  // it on; a DND the user had set stays. Ownership is also kept in a file,
+  // so a shell restart mid-share still turns it off afterwards.
   property bool _dndOwned: false
-  // A notification held until DND is off again, so it isn't silenced.
-  property var _afterDnd: null
+  // What the last finished setDnd call left DND at, as far as we know.
+  property bool _dndApplied: false
+  property bool _dndSending: false
+  // Notifications held until DND is off again, so they aren't silenced.
+  property var _afterDnd: []
+  readonly property string dndMarker: {
+    var dir = Quickshell.env("XDG_RUNTIME_DIR")
+    return dir ? dir + "/omashare-dnd-owned" : ""
+  }
+  property bool _pairCancelled: false
   // Text waiting to be written to wl-copy's stdin (see copyProc).
   property string _pendingCopy: ""
 
@@ -116,11 +125,13 @@ Panel {
 
   function applyScan(text) {
     scanning = false
+    var out = String(text || "").trim()
+    // A failed scan prints nothing (onExited reports it): keep the list.
+    if (out === "") return
     try {
-      var parsed = JSON.parse(String(text || "").trim() || "[]")
+      var parsed = JSON.parse(out)
       devices = Array.isArray(parsed) ? parsed : []
     } catch (e) {
-      devices = []
       scanError = "Scan failed"
     }
     if (deviceIndex >= devices.length) deviceIndex = Math.max(0, devices.length - 1)
@@ -174,20 +185,24 @@ Panel {
       external = true
       target = { name: status.name || "receiver", address: status.host, identifier: status.id, paired: true }
       if (phase !== "stopping") phase = "streaming"
-    } else if (external) {
-      external = false
-      phase = "idle"
+    } else {
+      if (external) {
+        external = false
+        phase = "idle"
+      }
+      // A share this panel no longer runs (it ended, or the shell restarted).
+      if (_dndOwned) releaseDnd(null)
     }
   }
 
   function activate(index) {
     var device = devices[index]
     if (!device || pinPairing) return
-    if (sharing && target && target.address === device.address) stop()
-    else if (!mirrorProc.running) {
-      if (device.paired) start(device)
-      else startPinPairing(device)
-    }
+    if (sharing && target && target.address === device.address) { stop(); return }
+    // The other rows are disabled while a share runs or stops.
+    if (sharing || external || phase === "stopping" || mirrorProc.running) return
+    if (device.paired) start(device)
+    else startPinPairing(device)
   }
 
   function checkFirewall() {
@@ -208,8 +223,6 @@ Panel {
     _pendingCopy = firewallCommand
     copyProc.stdinEnabled = true
     copyProc.running = true
-    commandCopied = true
-    copiedTimer.restart()
   }
 
   // One-time pairing: the receiver shows a PIN, which goes to the helper on
@@ -219,6 +232,7 @@ Panel {
     target = device
     error = ""
     _paired = false
+    _pairCancelled = false
     phase = "pin-request"
     pairProc.command = [helperPath, "pair", device.address,
                         "--port", String(device.port || 7000),
@@ -232,12 +246,22 @@ Panel {
     if (phase !== "pin" || !/^[0-9]{4}$/.test(code)) return
     phase = "pin-check"
     pairProc.write(code + "\n")
+    restoreKeyFocus()
   }
 
   function cancelPinPairing() {
     if (!pairProc.running) return
-    pairProc.write("\n")  // an empty line cancels
+    _pairCancelled = true
+    // Before the PIN is asked for, the helper isn't reading yet: stop it.
+    if (phase === "pin-request") pairProc.running = false
+    else pairProc.write("\n")  // an empty line cancels
     phase = "idle"
+    restoreKeyFocus()
+  }
+
+  // The PIN field had focus; give it back to the list's key handling.
+  function restoreKeyFocus() {
+    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
   function markPaired(id, paired) {
@@ -252,6 +276,7 @@ Panel {
   }
 
   function handlePairEvent(line) {
+    if (_pairCancelled) return
     var msg
     try { msg = JSON.parse(line) } catch (e) { return }
     if (msg.event === "pin") {
@@ -266,7 +291,13 @@ Panel {
     }
   }
 
-  function pairFinished(exitCode) {
+  function pairFinished() {
+    restoreKeyFocus()
+    if (_pairCancelled) {
+      _pairCancelled = false
+      phase = "idle"
+      return
+    }
     if (_paired) {
       phase = "idle"
       notifySend("Paired", (target ? target.name : "Receiver") + " is paired with this computer")
@@ -323,20 +354,40 @@ Panel {
   function applyDndState(text) {
     if (String(text || "").trim() !== "off" || !mirrorProc.running) return
     _dndOwned = true
-    setDnd(true)
+    if (dndMarker !== "") Quickshell.execDetached(["touch", dndMarker])
+    syncDnd()
   }
 
   // Turn DND off if the share turned it on, then run *then*.
   function releaseDnd(then) {
-    if (!_dndOwned) { if (then) then(); return }
-    _dndOwned = false
-    _afterDnd = then || null
-    setDnd(false)
+    if (then) _afterDnd = _afterDnd.concat([then])
+    if (_dndOwned) {
+      _dndOwned = false
+      if (dndMarker !== "") Quickshell.execDetached(["rm", "-f", dndMarker])
+    }
+    syncDnd()
   }
 
-  function setDnd(on) {
-    dndSetProc.command = ["omarchy-shell", "notifications", "setDnd", on ? "on" : "off"]
-    dndSetProc.running = true
+  // Bring DND to what ownership asks for, one setDnd call at a time: a share
+  // that ends while the "on" call runs gets its "off" right after it.
+  function syncDnd() {
+    if (dndSetProc.running) return  // onExited calls back
+    if (_dndApplied !== _dndOwned) {
+      _dndSending = _dndOwned
+      dndSetProc.command = ["omarchy-shell", "notifications", "setDnd", _dndOwned ? "on" : "off"]
+      dndSetProc.running = true
+      return
+    }
+    var pending = _afterDnd
+    _afterDnd = []
+    for (var i = 0; i < pending.length; i++) pending[i]()
+  }
+
+  // A marker left by a share before a shell restart: DND is ours to undo.
+  function adoptDnd() {
+    _dndOwned = true
+    _dndApplied = true
+    checkStatus()  // turns it off unless that share still runs
   }
 
   onOpenedChanged: {
@@ -351,6 +402,7 @@ Panel {
     checkStatus()
     checkFirewall()
     scan()
+    if (dndMarker !== "") dndMarkerProc.running = true
   }
 
   Process {
@@ -381,7 +433,14 @@ Panel {
       root._pendingCopy = ""
       stdinEnabled = false  // closes stdin: wl-copy takes the text
     }
-    onExited: { root._pendingCopy = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      root._pendingCopy = ""
+      stdinEnabled = false
+      if (exitCode === 0) {
+        root.commandCopied = true
+        copiedTimer.restart()
+      }
+    }
   }
 
   Timer {
@@ -399,12 +458,17 @@ Panel {
   Process {
     id: dndSetProc
     onExited: {
+      root._dndApplied = root._dndSending
       // The bar's DND indicator reads its state on refresh.
       Quickshell.execDetached(["omarchy-shell", "-q", "omarchy.indicators", "refresh"])
-      var then = root._afterDnd
-      root._afterDnd = null
-      if (then) then()
+      root.syncDnd()
     }
+  }
+
+  Process {
+    id: dndMarkerProc
+    command: ["test", "-e", root.dndMarker]
+    onExited: function(exitCode) { if (exitCode === 0) root.adoptDnd() }
   }
 
   Process {
@@ -438,7 +502,7 @@ Panel {
     id: pairProc
     stdinEnabled: true
     stdout: SplitParser { onRead: function(line) { root.handlePairEvent(line) } }
-    onExited: function(exitCode) { root.pairFinished(exitCode) }
+    onExited: root.pairFinished()
   }
 
   Process {

@@ -71,9 +71,9 @@ sudo ufw allow 47010/udp comment omashare
 
 The panel checks for it without root, by reading `/etc/ufw/ufw.conf` and
 `/etc/ufw/user.rules`, which anyone can read. While the rule is missing, a
-notice at the top of the panel shows the command with a Copy button, and it
-goes away once the rule exists. A rule for that port from your local
-networks only counts too. The port is a setting (`timingPort`, or
+notice in the panel, above the receiver list, shows the command with a Copy
+button, and it goes away once the rule exists. A rule for that port from
+your local networks only counts too. The port is a setting (`timingPort`, or
 `--timing-port`), and the notice follows it. Other firewalls aren't checked.
 If a receiver accepts the session and then stops answering, the panel says
 the timing port may be blocked.
@@ -112,10 +112,11 @@ o.bind("SUPER + CTRL + A", "Omashare", "omarchy-shell shell toggle lcd1232.omash
 
 ## Usage
 
-Receivers you've paired with are listed first. While you share, Do Not
-Disturb is on, so notifications don't show up on the TV. It goes off again
-when you stop, unless it was already on (setting: *Do Not Disturb while
-sharing*).
+Receivers you've paired with are listed first. Once the picture is up, Do
+Not Disturb turns on, so notifications don't show up on the TV. It turns off
+again when sharing stops, unless it was already on, and also after a shell
+restart in the middle of a share (setting: *Do Not Disturb while sharing*).
+Shares started from a terminal leave it alone.
 
 Open the panel, then click a receiver or select one with the arrow keys and
 press Enter. Clicking it again or using **Stop sharing** ends the mirror.
