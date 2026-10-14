@@ -14,8 +14,11 @@ def test_start_time_identifies_this_process():
 
 
 def test_fallback_runtime_dir_is_private(monkeypatch, tmp_path):
+    fallback = tmp_path / "omashare-uid"  # not the real /tmp/omashare-<uid>
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    monkeypatch.setattr(proc, "Path", lambda _: fallback)
     path = proc.runtime_dir()
+    assert path == fallback
     info = os.lstat(path)
     assert info.st_uid == os.getuid()
     assert stat.S_IMODE(info.st_mode) & 0o077 == 0

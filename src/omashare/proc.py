@@ -67,14 +67,15 @@ def is_running(pid: object, start: object = None) -> bool:
 PR_SET_PDEATHSIG = 1
 
 
-def die_with_parent(sig: int) -> None:
+def die_with_parent(sig: int, parent: Optional[int] = None) -> None:
     """Have the kernel send *sig* to this process when its parent exits.
 
-    If the parent had already exited before the prctl, the process has been
-    re-parented (to init, or to a subreaper such as ``systemd --user``) and
-    no signal would ever come, so it is sent right away.
+    *parent* is the parent's pid as seen earliest (by default, now). If it
+    had exited before the prctl, the process has been re-parented (to init,
+    or to a subreaper such as ``systemd --user``) and no signal would ever
+    come, so it is sent right away.
     """
-    parent = os.getppid()
+    expected = os.getppid() if parent is None else parent
     ctypes.CDLL(None, use_errno=True).prctl(PR_SET_PDEATHSIG, int(sig))
-    if os.getppid() != parent:
+    if os.getppid() != expected:
         os.kill(os.getpid(), sig)

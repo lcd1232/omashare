@@ -52,19 +52,39 @@ def test_status_ignores_stale_pid(pid_file, capsys):
     assert run(capsys, "status")[1]["running"] is False
 
 
+def _running(pid_file):
+    from omashare.proc import this_process
+
+    pid_file.write_text(json.dumps(this_process()))
+
+
 def test_stop_signals_running_mirror(pid_file, capsys, monkeypatch):
-    pid_file.write_text(str(os.getpid()))
+    _running(pid_file)
     sent = []
-    real_kill = os.kill
-    monkeypatch.setattr(
-        cli.os, "kill", lambda pid, sig: sent.append(sig) if sig else real_kill(pid, 0)
-    )
+    monkeypatch.setattr(cli.os, "kill", lambda pid, sig: sent.append((pid, sig)))
     assert run(capsys, "stop") == (0, {"stopped": True})
-    assert sent == [cli.signal.SIGTERM]
+    assert sent == [(os.getpid(), cli.signal.SIGTERM)]
+
+
+def test_stop_when_the_mirror_just_ended(pid_file, capsys, monkeypatch):
+    _running(pid_file)
+
+    def gone(pid, sig):
+        raise ProcessLookupError
+
+    monkeypatch.setattr(cli.os, "kill", gone)
+    assert run(capsys, "stop") == (0, {"stopped": False})
+
+
+def test_a_bare_pid_is_not_trusted(pid_file, capsys, monkeypatch):
+    # Without a start time the pid may belong to an unrelated process.
+    pid_file.write_text(str(os.getpid()))
+    monkeypatch.setattr(cli.os, "kill", lambda pid, sig: pytest.fail("signalled"))
+    assert run(capsys, "stop") == (0, {"stopped": False})
 
 
 def test_mirror_refuses_second_session(pid_file, capsys):
-    pid_file.write_text(str(os.getpid()))
+    _running(pid_file)
     code, event = run(capsys, "mirror", "192.0.2.1")
     assert code == 1
     assert event["event"] == "error"
@@ -77,7 +97,7 @@ def test_status_restores_stale_audio_when_idle(pid_file, capsys, restored):
 
 
 def test_status_leaves_audio_alone_while_mirroring(pid_file, capsys, restored):
-    pid_file.write_text(str(os.getpid()))
+    _running(pid_file)
     run(capsys, "status")
     assert restored == []
 
@@ -295,3 +315,16 @@ def test_verbose_keeps_pyatv_debug():
 
     cli._setup_logging(verbose=True, to_file=False)
     assert logging.getLogger("pyatv").getEffectiveLevel() == logging.DEBUG
+
+
+def test_only_one_process_holds_the_pid_file(pid_file):
+    first = cli._claim_pid_file({"pid": 1, "start": "1"})
+    assert first is not None
+    try:
+        assert cli._claim_pid_file({"pid": 2, "start": "2"}) is None
+        assert json.loads(pid_file.read_text()) == {"pid": 1, "start": "1"}
+    finally:
+        first.close()
+    second = cli._claim_pid_file({"pid": 2, "start": "2"})  # released: free again
+    assert second is not None
+    second.close()

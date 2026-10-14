@@ -47,15 +47,11 @@ class DeviceStore:
 
     def identity(self, device_id: str) -> Optional[MediaIdentity]:
         """The identity paired with *device_id*, or None if it isn't paired."""
-        entry = self._load().get(_key(device_id))
-        try:
-            return MediaIdentity.from_hex(entry["identity"]) if entry else None
-        except (KeyError, TypeError, ValueError):
-            return None
+        return _identity(self._load().get(_key(device_id)))
 
     def paired(self) -> set[str]:
-        """Ids of every receiver with a stored identity."""
-        return {k for k in self._load() if self.identity(k) is not None}
+        """Ids (normalised) of every receiver with a usable stored identity."""
+        return {_key(k) for k, entry in self._load().items() if _identity(entry)}
 
     def save(self, device_id: str, name: str, identity: MediaIdentity) -> None:
         data = self._load()
@@ -69,3 +65,10 @@ class DeviceStore:
             return False
         self._write(data)
         return True
+
+
+def _identity(entry: object) -> Optional[MediaIdentity]:
+    try:
+        return MediaIdentity.from_hex(entry["identity"]) if entry else None  # type: ignore[index]
+    except (KeyError, TypeError, ValueError):
+        return None

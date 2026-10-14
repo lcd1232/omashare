@@ -15,7 +15,7 @@ def test_cancelled_pick_ends_quietly_without_connecting(monkeypatch, tmp_path):
         raise AssertionError("connected to the receiver after a cancelled pick")
 
     monkeypatch.setattr(capture, "pick_source", cancelled)
-    monkeypatch.setattr(mirror, "http_connect", must_not_connect)
+    monkeypatch.setattr(mirror, "connect", must_not_connect)
     monkeypatch.setattr(mirror, "runtime_dir", lambda: tmp_path)
     events = []
     asyncio.run(

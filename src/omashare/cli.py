@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import errno
+import fcntl
 import json
 import logging
 import logging.handlers
@@ -48,11 +49,40 @@ def _read_owner() -> dict | None:
         record = json.loads(PID_FILE.read_text())
     except (OSError, ValueError):
         return None
-    if not isinstance(record, dict):
-        record = {"pid": record}  # a bare pid from an older version
-    if not is_running(record.get("pid"), record.get("start")):
+    # Without its start time a pid could name an unrelated, newer process.
+    if not isinstance(record, dict) or not record.get("start"):
+        return None
+    if not is_running(record.get("pid"), record["start"]):
         return None
     return record
+
+
+def _claim_pid_file(record: dict) -> object | None:
+    """Become the one running mirror: lock the PID file and write *record*.
+
+    Returns the open file, which holds the lock until this process exits (the
+    kernel drops it even if the process is killed), or None if another mirror
+    holds it.
+    """
+    while True:
+        fh = open(PID_FILE, "a+")  # noqa: SIM115 - held for the process's life
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            fh.close()
+            return None
+        try:
+            same = os.fstat(fh.fileno()).st_ino == PID_FILE.stat().st_ino
+        except FileNotFoundError:
+            same = False
+        if same:
+            break
+        fh.close()  # the previous owner removed it meanwhile: start over
+    fh.seek(0)
+    fh.truncate()
+    fh.write(json.dumps(record))
+    fh.flush()
+    return fh
 
 
 def _read_pid() -> int | None:
@@ -165,7 +195,10 @@ def cmd_status(_args) -> int:
 def cmd_stop(_args) -> int:
     pid = _read_pid()
     if pid is not None:
-        os.kill(pid, signal.SIGTERM)
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:  # it ended on its own just now
+            pid = None
     _print({"stopped": pid is not None})
     return 0
 
@@ -176,6 +209,9 @@ def cmd_firewall(args) -> int:
 
 
 def cmd_mirror(args) -> int:
+    # Seen before anything slow (the receiver lookup), so a parent that dies
+    # meanwhile is still noticed by die_with_parent.
+    parent = os.getppid()
     if (pid := _read_pid()) is not None:
         _emit("error", message=f"already mirroring (pid {pid}); run 'omashare stop'")
         return 1
@@ -189,19 +225,27 @@ def cmd_mirror(args) -> int:
     if identity is None:
         _emit("error", code="not-paired", id=device_id, message=f"{name} is not paired yet")
         return 2
-    PID_FILE.write_text(
-        json.dumps({**this_process(), "name": name, "host": args.host, "id": device_id})
-    )
+    lock = _claim_pid_file({**this_process(), "name": name, "host": args.host, "id": device_id})
+    if lock is None:
+        _emit("error", message="already mirroring; run 'omashare stop'")
+        return 1
 
     async def run() -> int:
         # The widget runs the helper through uv, which a shell restart may kill
         # outright; the share would then go on with no UI to stop it. SIGTERM
         # ends it cleanly: TEARDOWN, and the audio route restored.
-        die_with_parent(signal.SIGTERM)
+        die_with_parent(signal.SIGTERM, parent)
         task = asyncio.current_task()
         loop = asyncio.get_running_loop()
+
+        def stop() -> None:
+            # Once: a second signal would cancel the TEARDOWN under way.
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                loop.remove_signal_handler(sig)
+            task.cancel()
+
         for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, task.cancel)
+            loop.add_signal_handler(sig, stop)
         try:
             await mirror.mirror(
                 args.host,
@@ -258,6 +302,7 @@ def cmd_mirror(args) -> int:
         return asyncio.run(run())
     finally:
         PID_FILE.unlink(missing_ok=True)
+        lock.close()
 
 
 def main(argv: list[str] | None = None) -> int:

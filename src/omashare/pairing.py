@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Awaitable, Callable
 
 from pyatv.protocols.airplay.mirror import MediaIdentity, register_media_identity
-from pyatv.support.http import http_connect
 from pyatv.support.rtsp import RtspSession
 
+from omashare.connect import connect
 from omashare.devices import DeviceStore
 
 
@@ -26,7 +26,7 @@ async def pair(
     instance a wrong PIN); nothing is stored then.
     """
     identity = MediaIdentity.generate()
-    connection = await http_connect(host, port)
+    connection = await connect(host, port)
     try:
         await register_media_identity(RtspSession(connection), identity, pin)
     finally:

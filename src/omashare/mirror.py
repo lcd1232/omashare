@@ -23,10 +23,10 @@ from pyatv.protocols.airplay.mirror import (
     run_fply_handshake,
 )
 from pyatv.protocols.airplay.mirror.framing import MirrorEncryptor
-from pyatv.support.http import http_connect
 from pyatv.support.rtsp import RtspSession
 
 from omashare import audio, capture
+from omashare.connect import connect
 from omashare.proc import runtime_dir
 from omashare.sink import AudioRoute
 
@@ -115,7 +115,7 @@ async def mirror(
     h264_path = placeholder_h264()
 
     emit("connecting", host=host, port=port)
-    connection = await http_connect(host, port)
+    connection = await connect(host, port)
     session = None
     route = contextlib.ExitStack()
     try:
