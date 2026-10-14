@@ -13,7 +13,7 @@ Panel.qml ── bin/omashare scan ───────────► pyatv.sc
           └─ bin/omashare mirror <host> ──► media pair-verify → FPLY handshake
                                             → MirrorSession (type-110 video over TCP)
                                                  ▲ video_command   ▲ audio_command
-gpu-screen-recorder (VAAPI/NVENC H.264, focused monitor)     │
+gpu-screen-recorder (VAAPI/NVENC H.264, picked source)       │
   └─ mpegts ─► ffmpeg -c copy -bsf h264_mp4toannexb ─► Annex-B H.264
 parec <sink>.monitor (s16le 44.1 kHz stereo)                 │
   └─ libfdk-aac via ctypes (AAC-ELD, 480 samples/frame) ─► len-prefixed frames
@@ -23,8 +23,9 @@ parec <sink>.monitor (s16le 44.1 kHz stereo)                 │
   pyatv from the fork into `~/.local/share/omashare/venv`. The venv lives
   outside the plugin folder because Omarchy refuses plugin folders that
   contain symlinks.
-- `mirror` prints JSON lines (`{"event": "connecting" | "pairing" |
-  "streaming" | "ended" | "error"}`) for the widget. SIGTERM stops it
+- `mirror` prints JSON lines (`{"event": "choosing" | "connecting" |
+  "pairing" | "streaming" | "ended" | "error"}`) for the widget, and `pair`
+  prints `"pin"` and `"paired"`. SIGTERM stops a mirror
   cleanly and sends RTSP `TEARDOWN`.
 - **Choosing what to share:** by default the desktop's screen-share dialog
   opens, which on Omarchy is `hyprland-preview-share-picker` with Screens,
@@ -111,9 +112,10 @@ bin/omashare stop
 
 ## Known limitations
 
-- A/V sync hasn't been checked on a real Apple TV. pyatv buffers about 2 s
-  of audio before sending (`AUDIO_PREBUFFER`), and video isn't delayed to
-  match.
+- Behaviour has only been checked on one Apple TV 4K (gen 2) on tvOS 27.
+- If EasyEffects is running but not processing every output (its "process
+  all output streams" is off), the shared audio may be silent. In that case
+  use the `both` audio mode or turn that EasyEffects option on.
 - In `tv` mode, apps that pin themselves to a specific sink are moved to the
   null sink. When sharing stops they return to the restored default, not to
   the sink they had pinned.
@@ -122,7 +124,6 @@ bin/omashare stop
 - Picture delay is about 0.26 s, measured with a millisecond clock on an
   Apple TV 4K, and the sound keeps up with it. Every audio packet is sent
   twice, one frame apart, so a lost Wi-Fi packet doesn't leave a gap.
-- Pairing was verified on one Apple TV 4K (gen 2) on tvOS 27.
 
 ## Development
 

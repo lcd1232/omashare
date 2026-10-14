@@ -23,6 +23,8 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
+from omashare.proc import is_running, runtime_dir, this_process
+
 _LOGGER = logging.getLogger(__name__)
 
 SINK_NAME = "omashare"
@@ -41,8 +43,7 @@ def _pactl(args: list[str]) -> str:
 
 
 def _state_file() -> Path:
-    base = os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/omashare-{os.getuid()}"
-    return Path(base) / "omashare-sink.json"
+    return runtime_dir() / "omashare-sink.json"
 
 
 class AudioRoute:
@@ -83,20 +84,37 @@ class AudioRoute:
                 "sink_properties=device.description=AirPlay",
             ]
         )
-        self._state_file.parent.mkdir(parents=True, exist_ok=True)
-        self._state_file.write_text(
-            json.dumps(
-                {"module": self._module, "previous": default, "pid": os.getpid()}
+        try:
+            self._state_file.parent.mkdir(parents=True, exist_ok=True)
+            self._state_file.write_text(
+                json.dumps(
+                    {"module": self._module, "previous": default, **this_process()}
+                )
             )
-        )
-        self._pactl(["set-default-sink", SINK_NAME])
-        # Streams pinned to a sink don't follow the default; move them over.
-        for line in self._pactl(["list", "short", "sink-inputs"]).splitlines():
-            stream_id = line.split("\t", 1)[0]
-            if stream_id.isdigit():
-                self._try(["move-sink-input", stream_id, SINK_NAME])
+            self._pactl(["set-default-sink", SINK_NAME])
+            self._move_streams(skip_sink=EFFECTS_SINK if effects else None)
+        except BaseException:
+            # __exit__ only runs once __enter__ returns: undo it here, or a
+            # failure halfway leaves local sound on the null sink.
+            self.__exit__(None, None, None)
+            raise
         _LOGGER.info("audio: routed output to %s (was %s)", SINK_NAME, default)
         return effects or f"{SINK_NAME}.monitor"
+
+    def _move_streams(self, skip_sink: Optional[str]) -> None:
+        """Move playing streams to the null sink; pinned ones don't follow the
+        default. Streams on *skip_sink* stay: EasyEffects already processes
+        them and plays its result into the (now null) default."""
+        skip = set()
+        if skip_sink:
+            for line in self._pactl(["list", "short", "sinks"]).splitlines():
+                parts = line.split("\t")
+                if len(parts) > 1 and parts[1] == skip_sink:
+                    skip.add(parts[0])
+        for line in self._pactl(["list", "short", "sink-inputs"]).splitlines():
+            parts = line.split("\t")
+            if parts[0].isdigit() and (len(parts) < 2 or parts[1] not in skip):
+                self._try(["move-sink-input", parts[0], SINK_NAME])
 
     def _effects_monitor(self) -> Optional[str]:
         """The monitor of EasyEffects' input sink, if it should be captured."""
@@ -130,18 +148,6 @@ class AudioRoute:
             _LOGGER.warning("pactl %s failed: %s", " ".join(args), exc)
 
 
-def _alive(pid: object) -> bool:
-    if not isinstance(pid, int) or pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
 def restore_stale(pactl: Runner = _pactl, state_file: Optional[Path] = None) -> None:
     """Undo a null sink left behind by a helper that didn't exit cleanly.
 
@@ -152,16 +158,23 @@ def restore_stale(pactl: Runner = _pactl, state_file: Optional[Path] = None) -> 
         state = json.loads(path.read_text())
     except (OSError, ValueError):
         return
-    if _alive(state.get("pid")):
+    if is_running(state.get("pid"), state.get("start")):
         return
     _LOGGER.info("audio: cleaning up a stale %s sink", SINK_NAME)
-    for args in (
-        ["set-default-sink", state.get("previous", "")],
-        ["unload-module", str(state.get("module", ""))],
-    ):
-        if args[-1]:
-            try:
-                pactl(args)
-            except (subprocess.CalledProcessError, OSError):
-                pass
+    previous = str(state.get("previous", ""))
+    try:
+        current = pactl(["get-default-sink"])
+    except (subprocess.CalledProcessError, OSError):
+        current = SINK_NAME
+    commands = []
+    # Only undo our own change: if the user picked another output since, keep it.
+    if current == SINK_NAME and previous and previous != SINK_NAME:
+        commands.append(["set-default-sink", previous])
+    if state.get("module"):
+        commands.append(["unload-module", str(state["module"])])
+    for args in commands:
+        try:
+            pactl(args)
+        except (subprocess.CalledProcessError, OSError):
+            pass
     path.unlink(missing_ok=True)

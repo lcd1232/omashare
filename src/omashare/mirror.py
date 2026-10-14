@@ -27,6 +27,7 @@ from pyatv.support.http import http_connect
 from pyatv.support.rtsp import RtspSession
 
 from omashare import audio, capture
+from omashare.proc import runtime_dir
 from omashare.sink import AudioRoute
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,12 +38,6 @@ AIRPLAY_PORT = 7000
 SOURCES = ("picker", "monitor")
 
 Emit = Callable[..., None]
-
-
-def runtime_dir() -> Path:
-    path = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/omashare-{os.getuid()}")
-    path.mkdir(parents=True, exist_ok=True)
-    return path
 
 
 def cache_dir() -> Path:
@@ -112,9 +107,7 @@ async def mirror(
             return
         target, label = capture.PORTAL, "your selection"
     else:
-        mon = capture.focused_monitor()
-        if monitor and monitor != mon.name:
-            mon = capture.Monitor(monitor, mon.width, mon.height)
+        mon = capture.focused_monitor(monitor)
         width, height = capture.fit_size(mon.width, mon.height, *max_size)
         target, label = mon.name, mon.name
     h264_path = placeholder_h264()

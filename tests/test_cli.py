@@ -26,7 +26,24 @@ def run(capsys, *argv):
 
 
 def test_status_without_pid_file(pid_file, capsys):
-    assert run(capsys, "status") == (0, {"running": False, "pid": None})
+    assert run(capsys, "status") == (
+        0,
+        {"running": False, "pid": None, "name": None, "host": None, "id": None},
+    )
+
+
+def test_status_names_the_receiver_being_shared(pid_file, capsys):
+    from omashare.proc import this_process
+
+    pid_file.write_text(json.dumps({**this_process(), "name": "Bedroom", "host": "h", "id": "AA"}))
+    code, status = run(capsys, "status")
+    assert status["running"] is True
+    assert (status["name"], status["host"], status["id"]) == ("Bedroom", "h", "AA")
+
+
+def test_a_reused_pid_is_not_a_running_mirror(pid_file, capsys):
+    pid_file.write_text(json.dumps({"pid": os.getpid(), "start": "1", "name": "Bedroom"}))
+    assert run(capsys, "status")[1]["running"] is False
 
 
 def test_status_ignores_stale_pid(pid_file, capsys):

@@ -42,6 +42,21 @@ class PickCancelled(Exception):
     """The screen-share dialog was closed without picking anything."""
 
 
+class CaptureError(Exception):
+    """The capture could not start (missing tool, encoder or portal error)."""
+
+
+#: What gpu-screen-recorder prints when the portal declines to share, which
+#: is what closing or cancelling the screen-share dialog does.
+_PORTAL_DECLINED = ("SelectSources failed", "Start failed")
+
+
+def _last_message(stderr: str) -> str:
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    useful = [line for line in lines if not line.startswith("gsr info")]
+    return (useful or lines or ["no output"])[-1]
+
+
 @dataclass(frozen=True)
 class Monitor:
     name: str
@@ -49,13 +64,20 @@ class Monitor:
     height: int
 
 
-def focused_monitor() -> Monitor:
-    """The focused Hyprland monitor, in physical pixels as captured."""
+def focused_monitor(name: Optional[str] = None) -> Monitor:
+    """The focused Hyprland monitor, or the one called *name*, in physical
+    pixels as captured."""
     out = subprocess.run(
         ["hyprctl", "monitors", "-j"], check=True, capture_output=True, text=True
     ).stdout
     monitors = json.loads(out)
-    mon = next((m for m in monitors if m.get("focused")), monitors[0])
+    if name:
+        mon = next((m for m in monitors if m.get("name") == name), None)
+        if mon is None:
+            known = ", ".join(m.get("name", "?") for m in monitors)
+            raise LookupError(f"no monitor called {name} (have: {known})")
+    else:
+        mon = next((m for m in monitors if m.get("focused")), monitors[0])
     width, height = int(mon["width"]), int(mon["height"])
     # Odd transforms (1, 3, 5, 7) rotate by 90°.
     if int(mon.get("transform", 0)) % 2:
@@ -161,21 +183,31 @@ async def pick_source(
 
     The size is the encoded one (already fitted into max_w x max_h), read
     from the first SPS. Leaves a restore token in *portal_token* for the
-    session's capture. Raises :class:`PickCancelled` if nothing was picked.
+    session's capture. Raises :class:`PickCancelled` if nothing was picked
+    and :class:`CaptureError` if the capture failed for any other reason.
     """
     # No token: the dialog is shown every time, not just the first time.
     portal_token.unlink(missing_ok=True)
     proc = await asyncio.create_subprocess_exec(
         *capture_argv(PORTAL, fps, max_w, max_h, cursor, portal_token),
         stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
-    assert proc.stdout is not None
+    assert proc.stdout is not None and proc.stderr is not None
+    # Drained alongside stdout, so a chatty stderr can't fill its pipe.
+    stderr_task = asyncio.ensure_future(proc.stderr.read())
     buf = b""
     try:
         while True:
             chunk = await proc.stdout.read(65536)
             if not chunk:
-                raise PickCancelled()
+                code = await proc.wait()
+                stderr = (await stderr_task).decode(errors="replace")
+                if any(marker in stderr for marker in _PORTAL_DECLINED):
+                    raise PickCancelled()
+                raise CaptureError(
+                    f"screen capture failed (exit {code}): {_last_message(stderr)}"
+                )
             buf += chunk
             starts = pacer.find_start_codes(buf)
             # Only NALs followed by another start code are complete.
@@ -190,6 +222,7 @@ async def pick_source(
         if proc.returncode is None:
             proc.kill()
         await proc.wait()
+        stderr_task.cancel()
 
 
 def _die_with_parent() -> None:
@@ -211,15 +244,23 @@ def main(argv: list[str] | None = None) -> int:
     gsr_argv, ffmpeg_argv = pipeline_argv(
         args.target, args.fps, max_w, max_h, not args.no_cursor, args.portal_token
     )
-    gsr = subprocess.Popen(
-        gsr_argv,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        preexec_fn=_die_with_parent,
-    )
-    ffmpeg = subprocess.Popen(
-        ffmpeg_argv, stdin=gsr.stdout, preexec_fn=_die_with_parent
-    )
+    # gsr's messages go to our stderr: the session discards them, the probe
+    # (pick_source) reads them to tell a cancelled dialog from a failure.
+    try:
+        gsr = subprocess.Popen(
+            gsr_argv, stdout=subprocess.PIPE, preexec_fn=_die_with_parent
+        )
+    except FileNotFoundError:
+        print("omashare: gpu-screen-recorder is not installed", file=sys.stderr)
+        return 127
+    try:
+        ffmpeg = subprocess.Popen(
+            ffmpeg_argv, stdin=gsr.stdout, preexec_fn=_die_with_parent
+        )
+    except FileNotFoundError:
+        gsr.kill()
+        print("omashare: ffmpeg is not installed", file=sys.stderr)
+        return 127
     assert gsr.stdout is not None
     gsr.stdout.close()  # ffmpeg owns the read end now
 
@@ -232,8 +273,9 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, _stop)
     code = ffmpeg.wait()
     _stop()
-    gsr.wait()
-    return code
+    gsr_code = gsr.wait()
+    # A gsr failure is the cause; ffmpeg only saw its output end.
+    return gsr_code if gsr_code not in (0, -signal.SIGKILL) else code
 
 
 if __name__ == "__main__":

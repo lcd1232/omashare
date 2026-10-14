@@ -46,6 +46,9 @@ Panel {
   property bool _userStopped: false
   property bool _streamed: false
   property bool _paired: false
+  // A share this widget did not start (a shell restart lost its process, or
+  // it was started from a terminal): known only through `omashare status`.
+  property bool external: false
 
   readonly property bool pinPairing: phase === "pin-request" || phase === "pin" || phase === "pin-check"
 
@@ -118,10 +121,33 @@ Panel {
   }
 
   function stop() {
+    if (external) {
+      phase = "stopping"
+      stopProc.running = true
+      return
+    }
     if (!mirrorProc.running) return
     _userStopped = true
     phase = "stopping"
     mirrorProc.running = false  // SIGTERM
+  }
+
+  function checkStatus() {
+    if (!statusProc.running && !mirrorProc.running) statusProc.running = true
+  }
+
+  function applyStatus(text) {
+    var status
+    try { status = JSON.parse(String(text || "").trim()) } catch (e) { return }
+    if (mirrorProc.running) return
+    if (status.running) {
+      external = true
+      target = { name: status.name || "receiver", address: status.host, identifier: status.id, paired: true }
+      if (phase !== "stopping") phase = "streaming"
+    } else if (external) {
+      external = false
+      phase = "idle"
+    }
   }
 
   function activate(index) {
@@ -234,10 +260,34 @@ Panel {
   onOpenedChanged: {
     if (!opened) return
     cursorActive = false
+    checkStatus()
     if (!sharing) scan()
   }
 
-  Component.onCompleted: scan()
+  Component.onCompleted: {
+    checkStatus()
+    scan()
+  }
+
+  Process {
+    id: statusProc
+    command: [root.helperPath, "status"]
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.applyStatus(text) }
+  }
+
+  Process {
+    id: stopProc
+    command: [root.helperPath, "stop"]
+    onExited: root.checkStatus()
+  }
+
+  // Follow an external share until it ends.
+  Timer {
+    interval: 3000
+    repeat: true
+    running: root.external
+    onTriggered: root.checkStatus()
+  }
 
   Timer {
     interval: 400

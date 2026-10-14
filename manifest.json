@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "lcd1232.omashare",
   "name": "Omashare",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "lcd1232",
   "license": "MIT",
   "description": "Mirror your screen and its audio to an Apple TV over AirPlay, from the Omarchy bar. Prototype.",
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Omashare",
-    "description": "Find AirPlay receivers and mirror the focused monitor to one.",
+    "description": "Find AirPlay receivers, pair with a PIN the first time, and mirror a screen, window or region with sound.",
     "category": "Media",
     "aliases": [
       "airplay",

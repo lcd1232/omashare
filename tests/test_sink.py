@@ -58,11 +58,13 @@ def test_tv_routes_to_null_sink_and_restores(state):
         assert pactl.default == "omashare"
         assert ["move-sink-input", "12", "omashare"] in pactl.calls
         assert ["move-sink-input", "13", "omashare"] in pactl.calls
-        assert json.loads(state.read_text()) == {
+        saved = json.loads(state.read_text())
+        assert {k: saved[k] for k in ("module", "previous", "pid")} == {
             "module": "536870913",
             "previous": "speakers",
             "pid": os.getpid(),
         }
+        assert saved["start"]  # with the pid, names this exact process
     assert pactl.default == "speakers"
     assert pactl.calls[-1] == ["unload-module", "536870913"]
     assert not state.exists()
@@ -88,8 +90,49 @@ def test_stale_sink_from_a_killed_helper_is_undone(state):
     state.write_text(json.dumps({"module": "77", "previous": "headphones"}))
     pactl = FakePactl(default="omashare")
     restore_stale(pactl, state)
-    assert pactl.calls == [["set-default-sink", "headphones"], ["unload-module", "77"]]
+    assert pactl.calls == [
+        ["get-default-sink"],
+        ["set-default-sink", "headphones"],
+        ["unload-module", "77"],
+    ]
     assert not state.exists()
+
+
+def test_stale_cleanup_keeps_an_output_the_user_picked_since(state):
+    state.write_text(json.dumps({"module": "77", "previous": "speakers"}))
+    pactl = FakePactl(default="headphones")
+    restore_stale(pactl, state)
+    assert ["set-default-sink", "speakers"] not in pactl.calls
+    assert ["unload-module", "77"] in pactl.calls
+
+
+def test_a_reused_pid_is_not_the_owner(state):
+    state.write_text(json.dumps(
+        {"module": "77", "previous": "speakers", "pid": os.getpid(), "start": "1"}
+    ))
+    pactl = FakePactl(default="omashare")
+    restore_stale(pactl, state)
+    assert ["unload-module", "77"] in pactl.calls
+
+
+def test_a_failure_halfway_through_setup_undoes_the_route(state):
+    pactl = FakePactl()
+    pactl.fail.add("set-default-sink")
+    with pytest.raises(subprocess.CalledProcessError):
+        with AudioRoute("tv", pactl=pactl, state_file=state):
+            pass
+    assert ["unload-module", "536870913"] in pactl.calls
+    assert not state.exists()
+
+
+def test_streams_already_on_easyeffects_stay_there(state):
+    pactl = FakePactl(
+        sinks=["speakers", "easyeffects_sink"],
+        inputs="12\t1\t-\tfloat32le\n13\t0\t-\ts16le",
+    )
+    with AudioRoute("tv", pactl=pactl, state_file=state):
+        assert ["move-sink-input", "13", "omashare"] in pactl.calls
+        assert ["move-sink-input", "12", "omashare"] not in pactl.calls
 
 
 def test_new_route_cleans_up_stale_state_first(state):

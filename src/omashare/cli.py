@@ -22,14 +22,10 @@ import sys
 from pathlib import Path
 
 from omashare.devices import DeviceStore
+from omashare.proc import is_running, runtime_dir, this_process
 from omashare.sink import MODES, restore_stale
 
-
-def _runtime_dir() -> Path:
-    return Path(os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/omashare-{os.getuid()}")
-
-
-PID_FILE = _runtime_dir() / "omashare.pid"
+PID_FILE = runtime_dir() / "omashare.pid"
 
 
 def _print(obj) -> None:
@@ -40,13 +36,38 @@ def _emit(event: str, **fields) -> None:
     _print({"event": event, **fields})
 
 
-def _read_pid() -> int | None:
+def _read_owner() -> dict | None:
+    """The running mirror's record (pid, start time, receiver), or None."""
     try:
-        pid = int(PID_FILE.read_text().strip())
-        os.kill(pid, 0)
-        return pid
+        record = json.loads(PID_FILE.read_text())
     except (OSError, ValueError):
         return None
+    if not isinstance(record, dict):
+        record = {"pid": record}  # a bare pid from an older version
+    if not is_running(record.get("pid"), record.get("start")):
+        return None
+    return record
+
+
+def _read_pid() -> int | None:
+    owner = _read_owner()
+    return owner["pid"] if owner else None
+
+
+def _die_with_parent() -> None:
+    """SIGTERM this process when its parent dies.
+
+    The bar widget runs the helper through uv; if the widget's shell is
+    restarted, uv may be killed outright, and the mirror would otherwise keep
+    streaming (and keep local sound on the null sink) with no UI to stop it.
+    SIGTERM ends it cleanly: TEARDOWN, and the audio route restored.
+    """
+    import ctypes
+
+    pr_set_pdeathsig = 1
+    ctypes.CDLL(None, use_errno=True).prctl(pr_set_pdeathsig, int(signal.SIGTERM))
+    if os.getppid() == 1:  # the parent was already gone before the prctl
+        os.kill(os.getpid(), signal.SIGTERM)
 
 
 def _restore_audio_if_idle() -> None:
@@ -131,8 +152,16 @@ def cmd_unpair(args) -> int:
 
 def cmd_status(_args) -> int:
     _restore_audio_if_idle()
-    pid = _read_pid()
-    _print({"running": pid is not None, "pid": pid})
+    owner = _read_owner() or {}
+    _print(
+        {
+            "running": bool(owner),
+            "pid": owner.get("pid"),
+            "name": owner.get("name"),
+            "host": owner.get("host"),
+            "id": owner.get("id"),
+        }
+    )
     return 0
 
 
@@ -162,10 +191,12 @@ def cmd_mirror(args) -> int:
     if identity is None:
         _emit("error", code="not-paired", id=device_id, message=f"{name} is not paired yet")
         return 2
-    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    PID_FILE.write_text(str(os.getpid()))
+    PID_FILE.write_text(
+        json.dumps({**this_process(), "name": name, "host": args.host, "id": device_id})
+    )
 
     async def run() -> int:
+        _die_with_parent()
         task = asyncio.current_task()
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):

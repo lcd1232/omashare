@@ -95,7 +95,41 @@ def test_pick_source_reads_the_size_from_the_first_sps(tmp_path, monkeypatch):
     assert not token.exists()
 
 
-def test_pick_source_raises_when_nothing_was_picked(tmp_path, monkeypatch):
-    monkeypatch.setattr(capture, "capture_argv", lambda *a: ["true"])
+def _fake_capture(stderr: str, code: int):
+    return [sys.executable, "-c", f"import sys; sys.stderr.write({stderr!r}); sys.exit({code})"]
+
+
+def test_pick_source_raises_cancelled_when_the_portal_declines(tmp_path, monkeypatch):
+    msg = "gsr info: ...\ngsr error: gsr_capture_portal_setup_dbus: Start failed\n"
+    monkeypatch.setattr(capture, "capture_argv", lambda *a: _fake_capture(msg, 1))
     with pytest.raises(capture.PickCancelled):
         asyncio.run(capture.pick_source(tmp_path / "token", 30, 1920, 1080, True))
+
+
+def test_pick_source_reports_other_failures_as_errors(tmp_path, monkeypatch):
+    msg = "omashare: gpu-screen-recorder is not installed\n"
+    monkeypatch.setattr(capture, "capture_argv", lambda *a: _fake_capture(msg, 127))
+    with pytest.raises(capture.CaptureError, match="not installed"):
+        asyncio.run(capture.pick_source(tmp_path / "token", 30, 1920, 1080, True))
+
+
+def test_capture_reports_a_missing_recorder(monkeypatch, capsys):
+    monkeypatch.setattr(capture, "pipeline_argv", lambda *a: (["no-such-gsr-binary"], ["cat"]))
+    monkeypatch.setattr(capture, "_die_with_parent", lambda: None)
+    assert capture.main(["--target", "eDP-1"]) == 127
+    assert "not installed" in capsys.readouterr().err
+
+
+def test_a_named_monitor_reports_its_own_size(monkeypatch):
+    out = (
+        '[{"name":"eDP-1","width":2880,"height":1920,"focused":true},'
+        '{"name":"DP-1","width":3840,"height":2160,"focused":false}]'
+    )
+
+    class Result:
+        stdout = out
+
+    monkeypatch.setattr(capture.subprocess, "run", lambda *a, **k: Result())
+    assert capture.focused_monitor("DP-1") == capture.Monitor("DP-1", 3840, 2160)
+    with pytest.raises(LookupError, match="no monitor called HDMI-A-1"):
+        capture.focused_monitor("HDMI-A-1")
