@@ -186,18 +186,26 @@ def test_pair_treats_an_empty_line_as_cancel(store, capsys, monkeypatch):
     assert code == 1 and events[-1]["code"] == "cancelled"
 
 
-def test_scan_marks_paired_receivers(store, capsys, monkeypatch):
+def test_scan_marks_paired_receivers_and_lists_them_first(store, capsys, monkeypatch):
     from pyatv.protocols.airplay.mirror import MediaIdentity
 
     from omashare import discover
 
     async def fake_scan(timeout, hosts=None):
-        return [{"name": "Bedroom", "identifier": "aa:bb"}, {"name": "Den", "identifier": "CC"}]
+        return [
+            {"name": "Attic", "identifier": "DD"},
+            {"name": "Bedroom", "identifier": "aa:bb"},
+            {"name": "Den", "identifier": "CC"},
+            {"name": "Kitchen", "identifier": "EE"},
+        ]
 
     monkeypatch.setattr(discover, "scan", fake_scan)
     store.save("AA:BB", "Bedroom", MediaIdentity.generate())
+    store.save("EE", "Kitchen", MediaIdentity.generate())
     code, devices = run(capsys, "scan")
-    assert [d["paired"] for d in devices] == [True, False]
+    assert [(d["name"], d["paired"]) for d in devices] == [
+        ("Bedroom", True), ("Kitchen", True), ("Attic", False), ("Den", False),
+    ]
 
 
 @pytest.fixture

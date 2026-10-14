@@ -32,6 +32,7 @@ Panel {
   readonly property string source: setting("source", "picker") === "monitor" ? "monitor" : "picker"
   readonly property bool showCursor: boolSetting("showCursor", true)
   readonly property bool notify: boolSetting("notify", true)
+  readonly property bool dndWhileSharing: boolSetting("dndWhileSharing", true)
   readonly property int timingPort: {
     var v = Number(setting("timingPort", 47010))
     return v >= 1024 && v <= 65535 ? Math.floor(v) : 47010
@@ -61,6 +62,12 @@ Panel {
   property bool firewallBlocked: false
   property string firewallCommand: ""
   property bool commandCopied: false
+
+  // Do Not Disturb while sharing. Turned off again only if this panel turned
+  // it on; a DND the user had set stays.
+  property bool _dndOwned: false
+  // A notification held until DND is off again, so it isn't silenced.
+  property var _afterDnd: null
   // Text waiting to be written to wl-copy's stdin (see copyProc).
   property string _pendingCopy: ""
 
@@ -283,6 +290,8 @@ Panel {
       _streamed = true
       notifySend("Sharing screen", "Mirroring " + msg.monitor + " to " + (target ? target.name : "receiver")
         + (msg.audio === "off" ? " (no audio)" : ""))
+      // After the notification above has been shown, or DND would hold it.
+      if (dndWhileSharing) dndOnTimer.restart()
     } else if (msg.event === "error") {
       error = String(msg.message || "Mirroring failed")
       if (msg.code === "not-paired" && msg.id) markPaired(msg.id, false)
@@ -291,14 +300,42 @@ Panel {
 
   function finished(exitCode) {
     var wasStreaming = _streamed
+    dndOnTimer.stop()
     if (!_userStopped && (exitCode !== 0 || error !== "")) {
       phase = "error"
       if (error === "") error = _stderrTail || ("Helper exited with code " + exitCode)
-      notifySend("Screen sharing failed", error)
+      var failure = error
+      releaseDnd(function() { notifySend("Screen sharing failed", failure) })
       return
     }
     phase = "idle"
-    if (wasStreaming) notifySend("Screen sharing stopped", target ? target.name : "")
+    var name = target ? target.name : ""
+    releaseDnd(function() { if (wasStreaming) notifySend("Screen sharing stopped", name) })
+  }
+
+  // Turn DND on for the share, unless it is on already.
+  function claimDnd() {
+    if (_dndOwned || dndStateProc.running || !mirrorProc.running) return
+    dndStateProc.running = true
+  }
+
+  function applyDndState(text) {
+    if (String(text || "").trim() !== "off" || !mirrorProc.running) return
+    _dndOwned = true
+    setDnd(true)
+  }
+
+  // Turn DND off if the share turned it on, then run *then*.
+  function releaseDnd(then) {
+    if (!_dndOwned) { if (then) then(); return }
+    _dndOwned = false
+    _afterDnd = then || null
+    setDnd(false)
+  }
+
+  function setDnd(on) {
+    dndSetProc.command = ["omarchy-shell", "notifications", "setDnd", on ? "on" : "off"]
+    dndSetProc.running = true
   }
 
   onOpenedChanged: {
@@ -344,6 +381,29 @@ Panel {
       stdinEnabled = false  // closes stdin: wl-copy takes the text
     }
     onExited: { root._pendingCopy = ""; stdinEnabled = false }
+  }
+
+  Timer {
+    id: dndOnTimer
+    interval: 1500
+    onTriggered: root.claimDnd()
+  }
+
+  Process {
+    id: dndStateProc
+    command: ["omarchy-shell", "notifications", "dndState"]
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.applyDndState(text) }
+  }
+
+  Process {
+    id: dndSetProc
+    onExited: {
+      // The bar's DND indicator reads its state on refresh.
+      Quickshell.execDetached(["omarchy-shell", "-q", "omarchy.indicators", "refresh"])
+      var then = root._afterDnd
+      root._afterDnd = null
+      if (then) then()
+    }
   }
 
   Process {

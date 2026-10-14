@@ -88,6 +88,8 @@ def cmd_scan(args) -> int:
     paired = DeviceStore().paired()
     for device in devices:
         device["paired"] = str(device["identifier"]).upper() in paired
+    # Paired receivers first; scan() already sorted by name, and sort is stable.
+    devices.sort(key=lambda d: not d["paired"])
     _print(devices)
     return 0
 

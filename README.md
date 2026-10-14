@@ -112,6 +112,11 @@ o.bind("SUPER + CTRL + A", "Omashare", "omarchy-shell shell toggle lcd1232.omash
 
 ## Usage
 
+Receivers you've paired with are listed first. While you share, Do Not
+Disturb is on, so notifications don't show up on the TV. It goes off again
+when you stop, unless it was already on (setting: *Do Not Disturb while
+sharing*).
+
 Open the panel, then click a receiver or select one with the arrow keys and
 press Enter. Clicking it again or using **Stop sharing** ends the mirror.
 Right-clicking the bar icon also stops it.

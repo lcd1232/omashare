@@ -32,7 +32,8 @@
       "showCursor": true,
       "notify": true,
       "source": "picker",
-      "timingPort": 47010
+      "timingPort": 47010,
+      "dndWhileSharing": true
     },
     "schema": [
       {
@@ -90,6 +91,13 @@
         "key": "notify",
         "type": "boolean",
         "label": "Notify when sharing starts and stops",
+        "defaultValue": true
+      },
+      {
+        "key": "dndWhileSharing",
+        "type": "boolean",
+        "label": "Do Not Disturb while sharing",
+        "description": "Silence notifications while your screen is shared, so they don't appear on the receiver. Turned off again when sharing stops, unless it was already on.",
         "defaultValue": true
       },
       {
