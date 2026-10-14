@@ -688,39 +688,87 @@ Panel {
 
           Repeater {
             model: root.devices
-            Button {
+            // Two lines, like the Bluetooth panel's device rows: the name, and
+            // the model or state below it in a smaller, dimmer line.
+            CursorSurface {
               id: deviceRow
               required property var modelData
               required property int index
-              readonly property bool current: root.sharing && root.target && root.target.address === modelData.address
+              readonly property bool usable: current || (!root.sharing && !root.pinPairing)
+              readonly property string detail: current ? "Sharing"
+                : (modelData.paired ? (modelData.model || modelData.address) : "Not paired")
               width: parent.width
-              leftAlign: true
-              iconText: current ? "󰄙" : "󰔂"
-              // Button labels do not elide, so the label is cut to fit here.
-              readonly property string label: modelData.name + "  ·  "
-                + (modelData.paired ? (modelData.model || modelData.address) : "not paired")
-              TextMetrics {
-                id: labelMetrics
-                font.family: root.bar.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                elide: Text.ElideRight
-                elideWidth: deviceRow.width - Style.font.icon - Style.spacing.controlGap
-                  - Style.spacing.controlPaddingX * 2 - Style.space(12)
-                text: deviceRow.label
+              implicitHeight: rowContent.implicitHeight + Style.spacing.rowPaddingX
+              opacity: usable ? 1.0 : 0.4
+              hasCursor: usable && root.cursorActive && root.deviceIndex === index
+              current: !!(root.sharing && root.target && root.target.address === modelData.address)
+              foreground: root.bar.foreground
+
+              MouseArea {
+                id: rowMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                enabled: deviceRow.usable
+                cursorShape: Qt.PointingHandCursor
+                onContainsMouseChanged: if (containsMouse) { root.cursorActive = true; root.deviceIndex = deviceRow.index }
+                onClicked: root.activate(deviceRow.index)
               }
-              text: labelMetrics.elidedText
+
               // Only the row being shared explains itself; a tooltip on every
               // row covers the section header above.
-              tooltipText: current ? "Stop sharing" : ""
-              fontSize: Style.font.bodySmall
-              foreground: root.bar.foreground
-              fontFamily: root.bar.fontFamily
-              active: current
-              enabled: current || (!root.sharing && !root.pinPairing)
-              hasCursor: root.cursorActive && root.deviceIndex === index
-              onClicked: root.activate(index)
-              onHovered: function(h) {
-                if (h) { root.cursorActive = true; root.deviceIndex = index }
+              PanelToolTip {
+                visible: deviceRow.current && rowMouse.containsMouse
+                text: "Stop sharing"
+                fontFamily: root.bar.fontFamily
+              }
+
+              Item {
+                id: rowContent
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Style.space(10)
+                anchors.rightMargin: Style.space(10)
+                implicitHeight: Math.max(rowIcon.implicitHeight, rowInfo.implicitHeight)
+
+                Text {
+                  id: rowIcon
+                  textFormat: Text.PlainText
+                  text: deviceRow.current ? "󰄙" : "󰔂"
+                  color: root.bar.foreground
+                  font.family: root.bar.fontFamily
+                  font.pixelSize: Style.font.heading
+                  anchors.left: parent.left
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Column {
+                  id: rowInfo
+                  spacing: Style.space(1)
+                  anchors.left: rowIcon.right
+                  anchors.leftMargin: Style.space(10)
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+
+                  Text {
+                    textFormat: Text.PlainText
+                    text: deviceRow.modelData.name
+                    color: root.bar.foreground
+                    font.family: root.bar.fontFamily
+                    font.pixelSize: Style.font.body
+                    elide: Text.ElideRight
+                    width: parent.width
+                  }
+                  Text {
+                    textFormat: Text.PlainText
+                    text: deviceRow.detail
+                    color: Qt.darker(root.bar.foreground, 1.5)
+                    font.family: root.bar.fontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                    width: parent.width
+                  }
+                }
               }
             }
           }
