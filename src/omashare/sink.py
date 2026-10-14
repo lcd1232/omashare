@@ -64,6 +64,10 @@ class AudioRoute:
         self._state_file = state_file or _state_file()
         self._module: Optional[str] = None
         self._previous: Optional[str] = None
+        #: Streams moved off a sink other than the default: {input: sink}.
+        #: Unloading the null sink sends streams to the default, so these
+        #: are moved back by hand.
+        self._pinned: dict[str, str] = {}
 
     def __enter__(self) -> Optional[str]:
         restore_stale(self._pactl, self._state_file)
@@ -85,13 +89,11 @@ class AudioRoute:
         )
         try:
             self._state_file.parent.mkdir(parents=True, exist_ok=True)
-            self._state_file.write_text(
-                json.dumps(
-                    {"module": self._module, "previous": default, **this_process()}
-                )
-            )
+            # Written before any change, so a crash midway can be undone.
+            self._write_state()
             self._pactl(["set-default-sink", SINK_NAME])
             self._move_streams(skip_sink=EFFECTS_SINK if effects else None)
+            self._write_state()  # now with the pinned streams
         except BaseException:
             # __exit__ only runs once __enter__ returns: undo it here, or a
             # failure halfway leaves local sound on the null sink.
@@ -104,16 +106,33 @@ class AudioRoute:
         """Move playing streams to the null sink; pinned ones don't follow the
         default. Streams on *skip_sink* stay: EasyEffects already processes
         them and plays its result into the (now null) default."""
-        skip = set()
-        if skip_sink:
-            for line in self._pactl(["list", "short", "sinks"]).splitlines():
-                parts = line.split("\t")
-                if len(parts) > 1 and parts[1] == skip_sink:
-                    skip.add(parts[0])
+        sinks = {}  # sink id -> name
+        for line in self._pactl(["list", "short", "sinks"]).splitlines():
+            parts = line.split("\t")
+            if len(parts) > 1:
+                sinks[parts[0]] = parts[1]
         for line in self._pactl(["list", "short", "sink-inputs"]).splitlines():
             parts = line.split("\t")
-            if parts[0].isdigit() and (len(parts) < 2 or parts[1] not in skip):
-                self._try(["move-sink-input", parts[0], SINK_NAME])
+            if not parts[0].isdigit():
+                continue
+            origin = sinks.get(parts[1]) if len(parts) > 1 else None
+            if skip_sink and origin == skip_sink:
+                continue
+            self._try(["move-sink-input", parts[0], SINK_NAME])
+            if origin and origin not in (self._previous, SINK_NAME):
+                self._pinned[parts[0]] = origin
+
+    def _write_state(self) -> None:
+        self._state_file.write_text(
+            json.dumps(
+                {
+                    "module": self._module,
+                    "previous": self._previous,
+                    "pinned": self._pinned,
+                    **this_process(),
+                }
+            )
+        )
 
     def _effects_monitor(self) -> Optional[str]:
         """The monitor of EasyEffects' input sink, if it should be captured."""
@@ -132,7 +151,10 @@ class AudioRoute:
     def __exit__(self, *exc) -> None:
         if self._module is None:
             return
-        # Unloading the null sink moves its streams back to the default.
+        # Unloading the null sink moves its streams back to the default;
+        # streams that were on another sink go back there first.
+        for stream, sink in self._pinned.items():
+            self._try(["move-sink-input", stream, sink])
         if self._previous:
             self._try(["set-default-sink", self._previous])
         self._try(["unload-module", self._module])
@@ -166,6 +188,9 @@ def restore_stale(pactl: Runner = _pactl, state_file: Optional[Path] = None) -> 
     except (subprocess.CalledProcessError, OSError):
         current = SINK_NAME
     commands = []
+    pinned = state.get("pinned")
+    if isinstance(pinned, dict):
+        commands += [["move-sink-input", str(i), str(s)] for i, s in pinned.items()]
     # Only undo our own change: if the user picked another output since, keep it.
     if current == SINK_NAME and previous and previous != SINK_NAME:
         commands.append(["set-default-sink", previous])

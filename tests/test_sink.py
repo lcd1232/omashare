@@ -178,3 +178,29 @@ def test_effects_are_kept_when_asked(state):
     pactl = FakePactl(sinks=["speakers", "easyeffects_sink"])
     with AudioRoute("tv", bypass_effects=False, pactl=pactl, state_file=state) as source:
         assert source == "omashare.monitor"
+
+
+def test_streams_on_another_output_go_back_to_it(state):
+    # Spotify (12) was routed to USB headphones; Firefox (13) followed the default.
+    pactl = FakePactl(sinks=["speakers", "headphones"], inputs="12\t1\t-\tfloat32le\n13\t0\t-\ts16le")
+    with AudioRoute("tv", pactl=pactl, state_file=state):
+        assert json.loads(state.read_text())["pinned"] == {"12": "headphones"}
+        assert ["move-sink-input", "12", "omashare"] in pactl.calls
+        assert ["move-sink-input", "13", "omashare"] in pactl.calls
+        moves_before = len(pactl.calls)
+    after = pactl.calls[moves_before:]
+    assert ["move-sink-input", "12", "headphones"] in after
+    assert not any(c[:2] == ["move-sink-input", "13"] for c in after)  # the default takes it
+    assert after.index(["move-sink-input", "12", "headphones"]) < after.index(["unload-module", "536870913"])
+
+
+def test_stale_cleanup_moves_pinned_streams_back(state):
+    state.write_text(json.dumps({"module": "77", "previous": "speakers", "pinned": {"12": "headphones"}}))
+    pactl = FakePactl(default="omashare")
+    restore_stale(pactl, state)
+    assert pactl.calls == [
+        ["get-default-sink"],
+        ["move-sink-input", "12", "headphones"],
+        ["set-default-sink", "speakers"],
+        ["unload-module", "77"],
+    ]

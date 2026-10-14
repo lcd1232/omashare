@@ -152,9 +152,6 @@ bin/omashare stop
 - If EasyEffects is running but not processing every output (its "process
   all output streams" is off), the shared audio may be silent. In that case
   use the `both` audio mode or turn that EasyEffects option on.
-- In `tv` mode, apps that pin themselves to a specific sink are moved to the
-  null sink. When sharing stops they return to the restored default, not to
-  the sink they had pinned.
 - What is shared is fixed when sharing starts. A shared window that is
   resized keeps the size it had when it was picked.
 - Picture delay is about 0.26 s, measured with a millisecond clock on an
