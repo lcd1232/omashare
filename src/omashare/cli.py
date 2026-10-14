@@ -112,7 +112,11 @@ def cmd_pair(args) -> int:
         _emit("error", message=str(exc))
         return 1
 
+    asked = False
+
     async def pin() -> str:
+        nonlocal asked
+        asked = True
         _emit("pin", id=device_id, name=name)
         line = await asyncio.get_running_loop().run_in_executor(
             None, sys.stdin.readline
@@ -126,14 +130,23 @@ def cmd_pair(args) -> int:
             await pair(args.host, args.port, device_id, name, pin, DeviceStore())
         except exceptions.AuthenticationError as exc:
             logging.getLogger(__name__).info("pairing failed: %s", exc)
-            cancelled = "cancelled" in str(exc)
-            _emit(
-                "error",
-                code="cancelled" if cancelled else "pairing-refused",
-                message="Pairing cancelled"
-                if cancelled
-                else f"{name} did not accept the PIN",
-            )
+            if "cancelled" in str(exc):
+                _emit("error", code="cancelled", message="Pairing cancelled")
+            elif asked:
+                _emit(
+                    "error",
+                    code="pairing-refused",
+                    message=f"{name} did not accept the PIN",
+                )
+            else:
+                # Refused before showing a PIN: a Mac whose "Allow AirPlay
+                # for" is "Current User" takes only its owner's devices.
+                _emit(
+                    "error",
+                    code="receiver-restricted",
+                    message=f"{name} only accepts its owner's devices. On a Mac, "
+                    "set Allow AirPlay for to Anyone on the Same Network",
+                )
             return 1
         except Exception as exc:  # noqa: BLE001 - reported to the widget
             logging.getLogger(__name__).exception("pairing failed")

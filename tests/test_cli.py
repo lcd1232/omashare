@@ -156,6 +156,22 @@ def test_pair_reports_a_refused_pin(store, capsys, monkeypatch):
     assert store.identity("AA") is None
 
 
+def test_pair_reports_a_receiver_that_refuses_before_the_pin(store, capsys, monkeypatch):
+    from pyatv import exceptions
+
+    from omashare import pairing
+
+    async def restricted(host, port, device_id, name, pin, store_):
+        raise exceptions.AuthenticationError("not authenticated")  # HTTP 403
+
+    monkeypatch.setattr(pairing, "pair", restricted)
+    code, events = run_lines(capsys, "pair", "192.0.2.1", "--id", "AA", "--name", "MacBook")
+    assert code == 1
+    assert events == [{"event": "error", "code": "receiver-restricted",
+                       "message": "MacBook only accepts its owner's devices. On a Mac, "
+                       "set Allow AirPlay for to Anyone on the Same Network"}]
+
+
 def test_pair_treats_an_empty_line_as_cancel(store, capsys, monkeypatch):
     import io
 

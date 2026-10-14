@@ -113,6 +113,10 @@ bin/omashare stop
 ## Known limitations
 
 - Behaviour has only been checked on one Apple TV 4K (gen 2) on tvOS 27.
+- A Mac receiver refuses pairing (HTTP 403, before any PIN) while its
+  System Settings → General → AirDrop & Handoff → *Allow AirPlay for* is
+  *Current User*, the macOS default. Set it to *Anyone on the Same
+  Network*. Mirroring to a Mac is otherwise untested.
 - If EasyEffects is running but not processing every output (its "process
   all output streams" is off), the shared audio may be silent. In that case
   use the `both` audio mode or turn that EasyEffects option on.
