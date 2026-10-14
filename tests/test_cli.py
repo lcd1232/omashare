@@ -198,3 +198,67 @@ def test_scan_marks_paired_receivers(store, capsys, monkeypatch):
     store.save("AA:BB", "Bedroom", MediaIdentity.generate())
     code, devices = run(capsys, "scan")
     assert [d["paired"] for d in devices] == [True, False]
+
+
+@pytest.fixture
+def paired(store):
+    from pyatv.protocols.airplay.mirror import MediaIdentity
+
+    store.save("AA", "MacBook", MediaIdentity.generate())
+    return store
+
+
+def _failing_mirror(monkeypatch, exc, seen=None):
+    from omashare import mirror
+
+    async def fake(host, port, **kwargs):
+        if seen is not None:
+            seen.update(kwargs)
+        raise exc
+
+    monkeypatch.setattr(mirror, "mirror", fake)
+
+
+def test_mirror_uses_the_fixed_timing_port(pid_file, paired, capsys, monkeypatch):
+    seen = {}
+    _failing_mirror(monkeypatch, RuntimeError("boom"), seen)
+    run_lines(capsys, "mirror", "192.0.2.1", "--id", "AA")
+    assert seen["timing_port"] == 47010
+    run_lines(capsys, "mirror", "192.0.2.1", "--id", "AA", "--timing-port", "5000")
+    assert seen["timing_port"] == 5000
+
+
+def test_mirror_explains_a_receiver_that_stops_answering(pid_file, paired, capsys, monkeypatch):
+    _failing_mirror(monkeypatch, TimeoutError("no response to SETUP rtsp://x/1 (RTSP/1.0)"))
+    code, events = run_lines(capsys, "mirror", "192.0.2.1", "--id", "AA", "--name", "MacBook")
+    assert code == 1
+    assert events[-1] == {
+        "event": "error",
+        "code": "receiver-silent",
+        "message": "MacBook stopped answering. A firewall may be blocking "
+        "its timing requests to UDP port 47010",
+    }
+
+
+def test_mirror_reports_a_busy_timing_port(pid_file, paired, capsys, monkeypatch):
+    import errno
+
+    _failing_mirror(monkeypatch, OSError(errno.EADDRINUSE, "Address already in use"))
+    code, events = run_lines(capsys, "mirror", "192.0.2.1", "--id", "AA")
+    assert code == 1 and events[-1]["code"] == "timing-port-busy"
+
+
+def test_mirror_reports_other_os_errors_as_they_are(pid_file, paired, capsys, monkeypatch):
+    _failing_mirror(monkeypatch, ConnectionRefusedError(111, "Connection refused"))
+    code, events = run_lines(capsys, "mirror", "192.0.2.1", "--id", "AA")
+    assert code == 1
+    assert "code" not in events[-1]
+    assert "Connection refused" in events[-1]["message"]
+
+
+def test_firewall_command(capsys, monkeypatch):
+    from omashare import firewall
+
+    monkeypatch.setattr(firewall, "check", lambda port: {"port": port})
+    assert run(capsys, "firewall") == (0, {"port": 47010})
+    assert run(capsys, "firewall", "--timing-port", "5000") == (0, {"port": 5000})

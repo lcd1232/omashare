@@ -32,6 +32,10 @@ Panel {
   readonly property string source: setting("source", "picker") === "monitor" ? "monitor" : "picker"
   readonly property bool showCursor: boolSetting("showCursor", true)
   readonly property bool notify: boolSetting("notify", true)
+  readonly property int timingPort: {
+    var v = Number(setting("timingPort", 47010))
+    return v >= 1024 && v <= 65535 ? Math.floor(v) : 47010
+  }
 
   property var devices: []
   property bool scanning: false
@@ -51,6 +55,13 @@ Panel {
   property bool external: false
 
   readonly property bool pinPairing: phase === "pin-request" || phase === "pin" || phase === "pin-check"
+
+  // ufw drops the receiver's timing requests until the port is allowed
+  // (bin/omashare firewall). phase "firewall" offers the one-time rule
+  // before sharing to pendingDevice.
+  property bool firewallBlocked: false
+  property string firewallCommand: ""
+  property var pendingDevice: null
 
   property int deviceIndex: 0
   property bool cursorActive: false
@@ -72,6 +83,7 @@ Panel {
     if (phase === "pin") return "Enter the PIN shown on " + (target ? target.name : "the TV")
     if (phase === "pin-check") return "Checking the PIN"
     if (phase === "stopping") return "Stopping"
+    if (phase === "firewall") return "Firewall blocks receivers"
     if (phase === "error") return "Failed"
     if (scanning) return "Searching for receivers"
     return devices.length ? devices.length + (devices.length === 1 ? " receiver" : " receivers") : "Not sharing"
@@ -112,7 +124,8 @@ Panel {
                "--port", String(device.port || 7000),
                "--fps", String(fps),
                "--max-size", maxResolution,
-               "--audio", audioMode]
+               "--audio", audioMode,
+               "--timing-port", String(timingPort)]
     if (!showCursor) cmd.push("--no-cursor")
     mirrorProc.command = cmd
     mirrorProc.running = true
@@ -155,9 +168,54 @@ Panel {
     if (!device || pinPairing) return
     if (sharing && target && target.address === device.address) stop()
     else if (!mirrorProc.running) {
-      if (device.paired) start(device)
-      else startPinPairing(device)
+      if (firewallBlocked) {
+        pendingDevice = device
+        target = device
+        error = ""
+        phase = "firewall"
+        checkFirewall()
+      } else {
+        proceed(device)
+      }
     }
+  }
+
+  function proceed(device) {
+    if (device.paired) start(device)
+    else startPinPairing(device)
+  }
+
+  function checkFirewall() {
+    if (firewallProc.running) return
+    firewallProc.command = [helperPath, "firewall", "--timing-port", String(timingPort)]
+    firewallProc.running = true
+  }
+
+  function applyFirewall(text) {
+    var result
+    try { result = JSON.parse(String(text || "").trim()) } catch (e) { return }
+    firewallBlocked = result.allowed === false
+    firewallCommand = String(result.command || "")
+    // The rule was added while the panel waited: carry on with the share.
+    if (phase === "firewall" && !firewallBlocked) continuePending()
+  }
+
+  function allowInFirewall() {
+    if (firewallCommand === "") return
+    // Omarchy runs privileged steps in a floating terminal; sudo asks there.
+    Quickshell.execDetached(["omarchy-launch-floating-terminal-with-presentation", firewallCommand])
+  }
+
+  function continuePending() {
+    var device = pendingDevice
+    pendingDevice = null
+    phase = "idle"
+    if (device) proceed(device)
+  }
+
+  function cancelFirewall() {
+    pendingDevice = null
+    phase = "idle"
   }
 
   // One-time pairing: the receiver shows a PIN, which goes to the helper on
@@ -261,12 +319,27 @@ Panel {
     if (!opened) return
     cursorActive = false
     checkStatus()
+    checkFirewall()
     if (!sharing) scan()
   }
 
   Component.onCompleted: {
     checkStatus()
+    checkFirewall()
     scan()
+  }
+
+  Process {
+    id: firewallProc
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.applyFirewall(text) }
+  }
+
+  // Notice the rule as soon as the terminal has added it.
+  Timer {
+    interval: 1500
+    repeat: true
+    running: root.phase === "firewall"
+    onTriggered: root.checkFirewall()
   }
 
   Process {
@@ -337,6 +410,8 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     text: root.sharing ? "󰄙" : "󰄘"
+    // The theme's active colour, as the screen-recording indicator uses.
+    active: root.sharing
     tooltipText: root.phase === "streaming" ? root.statusText : "AirPlay screen sharing"
     onPressed: function(b) {
       if (b === Qt.RightButton && root.sharing) root.stop()
@@ -498,6 +573,66 @@ Panel {
           }
         }
 
+        // One-time firewall rule: receivers send timing requests to this
+        // computer, and Omarchy's ufw drops incoming traffic.
+        Column {
+          visible: root.phase === "firewall"
+          width: parent.width
+          spacing: Style.space(8)
+
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            text: "While sharing, " + (root.target ? root.target.name : "the receiver")
+              + " sends timing requests to UDP port " + root.timingPort
+              + " on this computer, and the firewall drops them. Allow that port once:"
+            opacity: 0.7
+            color: root.bar.foreground
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            wrapMode: Text.WrapAnywhere
+            text: root.firewallCommand
+            color: root.bar.foreground
+            font.family: "monospace"
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Button {
+            width: parent.width
+            iconText: "󰒃"
+            text: "Allow in firewall"
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            bordered: true
+            onClicked: root.allowInFirewall()
+          }
+
+          Row {
+            spacing: Style.space(6)
+
+            Button {
+              text: "Share anyway"
+              tooltipText: "For a firewall rule added some other way"
+              foreground: root.bar.foreground
+              fontFamily: root.bar.fontFamily
+              onClicked: root.continuePending()
+            }
+
+            Button {
+              text: "Cancel"
+              foreground: root.bar.foreground
+              fontFamily: root.bar.fontFamily
+              onClicked: root.cancelFirewall()
+            }
+          }
+        }
+
         Button {
           visible: root.sharing || root.phase === "stopping"
           width: parent.width
@@ -585,7 +720,7 @@ Panel {
               foreground: root.bar.foreground
               fontFamily: root.bar.fontFamily
               active: current
-              enabled: current || (!root.sharing && !root.pinPairing)
+              enabled: current || (!root.sharing && !root.pinPairing && root.phase !== "firewall")
               hasCursor: root.cursorActive && root.deviceIndex === index
               onClicked: root.activate(index)
               onHovered: function(h) {

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "lcd1232.omashare",
   "name": "Omashare",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": "lcd1232",
   "license": "MIT",
   "description": "Mirror your screen and its audio to an Apple TV over AirPlay, from the Omarchy bar. Prototype.",
@@ -31,7 +31,8 @@
       "audio": "tv",
       "showCursor": true,
       "notify": true,
-      "source": "picker"
+      "source": "picker",
+      "timingPort": 47010
     },
     "schema": [
       {
@@ -90,6 +91,16 @@
         "type": "boolean",
         "label": "Notify when sharing starts and stops",
         "defaultValue": true
+      },
+      {
+        "key": "timingPort",
+        "type": "integer",
+        "label": "Timing port (UDP)",
+        "description": "Receivers send clock-sync requests to this port while you share; the firewall must allow it. The panel offers the rule when it is missing.",
+        "min": 1024,
+        "max": 65535,
+        "step": 1,
+        "defaultValue": 47010
       }
     ]
   }

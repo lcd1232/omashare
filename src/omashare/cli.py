@@ -6,13 +6,15 @@ until SIGTERM/SIGINT or the receiver ends the session. ``pair`` prints
 ``{"event": "pin"}`` once the receiver shows its PIN, reads the PIN from a
 line on stdin, and ends with ``{"event": "paired"}``. A receiver that is not
 paired yet makes ``mirror`` fail with ``{"event": "error", "code":
-"not-paired"}``.
+"not-paired"}``. ``firewall`` says whether the host firewall lets receivers
+reach the timing port.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import errno
 import json
 import logging
 import logging.handlers
@@ -22,6 +24,7 @@ import sys
 from pathlib import Path
 
 from omashare.devices import DeviceStore
+from omashare.firewall import DEFAULT_TIMING_PORT
 from omashare.proc import is_running, runtime_dir, this_process
 from omashare.sink import MODES, restore_stale
 
@@ -186,6 +189,13 @@ def cmd_stop(_args) -> int:
     return 0
 
 
+def cmd_firewall(args) -> int:
+    from omashare import firewall
+
+    _print(firewall.check(args.timing_port))
+    return 0
+
+
 def cmd_mirror(args) -> int:
     from pyatv import exceptions
 
@@ -225,6 +235,7 @@ def cmd_mirror(args) -> int:
                 cursor=not args.no_cursor,
                 audio_mode=args.audio,
                 source=args.source,
+                timing_port=args.timing_port,
                 emit=_emit,
             )
         except asyncio.CancelledError:
@@ -240,9 +251,28 @@ def cmd_mirror(args) -> int:
                 message=f"{name} no longer knows this computer; pair again",
             )
             return 2
+        except TimeoutError:
+            # The receiver accepted the session but answers the stream SETUPs
+            # only after a clock sync, which a firewall can block.
+            logging.getLogger(__name__).exception("mirror failed")
+            _emit(
+                "error",
+                code="receiver-silent",
+                message=f"{name} stopped answering. A firewall may be blocking "
+                f"its timing requests to UDP port {args.timing_port}",
+            )
+            return 1
         except Exception as exc:  # noqa: BLE001 - reported to the widget
             logging.getLogger(__name__).exception("mirror failed")
-            _emit("error", message=f"{type(exc).__name__}: {exc}")
+            if isinstance(exc, OSError) and exc.errno == errno.EADDRINUSE:
+                _emit(
+                    "error",
+                    code="timing-port-busy",
+                    message=f"UDP port {args.timing_port} is in use; "
+                    "choose another timing port in the settings",
+                )
+            else:
+                _emit("error", message=f"{type(exc).__name__}: {exc}")
             return 1
         return 0
 
@@ -293,7 +323,17 @@ def main(argv: list[str] | None = None) -> int:
         default="tv",
         help="tv: only on the receiver; both: also locally; off: no audio",
     )
+    p.add_argument(
+        "--timing-port",
+        type=int,
+        default=DEFAULT_TIMING_PORT,
+        help="local UDP port for the receiver's timing requests (0: any free port)",
+    )
     p.set_defaults(func=cmd_mirror)
+
+    p = sub.add_parser("firewall", help="can receivers reach the timing port")
+    p.add_argument("--timing-port", type=int, default=DEFAULT_TIMING_PORT)
+    p.set_defaults(func=cmd_firewall)
 
     sub.add_parser("status", help="is a mirror running").set_defaults(func=cmd_status)
     sub.add_parser("stop", help="stop the running mirror").set_defaults(func=cmd_stop)

@@ -58,6 +58,27 @@ parec <sink>.monitor (s16le 44.1 kHz stereo)                 │
 - The capture pipelines use `PR_SET_PDEATHSIG`. When the session kills it,
   `gpu-screen-recorder`, `ffmpeg` and `parec` exit too.
 
+## Firewall
+
+While sharing, the receiver sends clock-sync (timing) requests to UDP port
+**47010** on this computer, and answers nothing else until they're answered.
+Every other connection goes out from here. Omarchy turns ufw on with incoming
+traffic denied, so that port needs one rule:
+
+```sh
+sudo ufw allow 47010/udp comment omashare
+```
+
+The panel checks for it without root, by reading `/etc/ufw/ufw.conf` and
+`/etc/ufw/user.rules`, which anyone can read. When the rule is missing,
+picking a receiver first shows **Allow in firewall**. It runs the command
+above in a floating terminal, and the share starts once the rule is there.
+A rule for that port from your local networks only counts too. The port is
+a setting (`timingPort`, or `--timing-port`); the panel then offers the
+rule for the new port. Other firewalls aren't checked. If a receiver
+accepts the session and then stops answering, the panel says the timing
+port may be blocked.
+
 ## Requirements
 
 - Omarchy with the Quickshell-based shell; `gpu-screen-recorder`, `ffmpeg`,
@@ -106,6 +127,7 @@ bin/omashare pair 192.168.88.63                 # prints {"event": "pin"}, then 
 bin/omashare unpair --id 9E:4D:0F:34:D4:7E      # forget a pairing
 bin/omashare mirror 192.168.88.63 --fps 30 --max-size 1920x1080 --audio tv
 bin/omashare mirror 192.168.88.63 --source monitor   # no dialog
+bin/omashare firewall                           # is the timing port allowed
 bin/omashare status
 bin/omashare stop
 ```
@@ -116,7 +138,7 @@ bin/omashare stop
 - A Mac receiver refuses pairing (HTTP 403, before any PIN) while its
   System Settings → General → AirDrop & Handoff → *Allow AirPlay for* is
   *Current User*, the macOS default. Set it to *Anyone on the Same
-  Network*. Mirroring to a Mac is otherwise untested.
+  Network*. Other senders are refused the same way.
 - If EasyEffects is running but not processing every output (its "process
   all output streams" is off), the shared audio may be silent. In that case
   use the `both` audio mode or turn that EasyEffects option on.

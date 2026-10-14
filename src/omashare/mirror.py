@@ -81,6 +81,7 @@ async def mirror(
     cursor: bool = True,
     audio_mode: str = "tv",
     source: str = "picker",
+    timing_port: int = 0,
     emit: Emit = lambda *a, **k: None,
 ) -> None:
     """Mirror until cancelled.
@@ -89,7 +90,8 @@ async def mirror(
     *source* is one of :data:`SOURCES`: ``picker`` shows the screen-share
     dialog first (and returns quietly if it is cancelled), ``monitor``
     shares *monitor*, by default the focused one. *audio_mode* is one of
-    :data:`omashare.sink.MODES`.
+    :data:`omashare.sink.MODES`. *timing_port* is the local UDP port the
+    receiver sends timing requests to (0: any free port).
     """
     if source not in SOURCES:
         raise ValueError(f"source must be one of {SOURCES}, got {source!r}")
@@ -146,6 +148,7 @@ async def mirror(
             ),
             audio_command=audio.audio_command(source) if source else None,
             pair_secret=pair_secret,
+            timing_port=timing_port,
         )
         emit(
             "streaming",

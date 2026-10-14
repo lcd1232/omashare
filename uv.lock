@@ -873,7 +873,7 @@ wheels = [
 
 [[package]]
 name = "omashare"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "pyatv" },
@@ -1054,7 +1054,7 @@ wheels = [
 [[package]]
 name = "pyatv"
 version = "0.18.0"
-source = { git = "https://github.com/lcd1232/pyatv.git?rev=airplay-mirror-fairplay#2254a5c1ca3c59a08526b7ad709b382c9c1adee2" }
+source = { git = "https://github.com/lcd1232/pyatv.git?rev=airplay-mirror-fairplay#620359e615b8def819af3d6a960abdc52b21c2a2" }
 dependencies = [
     { name = "aiohttp" },
     { name = "chacha20poly1305-reuseable" },
