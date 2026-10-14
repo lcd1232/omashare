@@ -10,7 +10,9 @@ def isolated_state(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     root = logging.getLogger()
     before = list(root.handlers)
+    pyatv_level = logging.getLogger("pyatv").level
     yield
+    logging.getLogger("pyatv").setLevel(pyatv_level)
     for handler in root.handlers[:]:
         if handler not in before:
             root.removeHandler(handler)

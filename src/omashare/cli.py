@@ -326,9 +326,29 @@ def log_file() -> Path:
     return Path(base) / "omashare" / "omashare.log"
 
 
+class _PrivateLog(logging.handlers.RotatingFileHandler):
+    """A rotating log only this user can read, including files made by rotation."""
+
+    def _open(self):
+        stream = open(  # noqa: SIM115 - the handler owns and closes it
+            self.baseFilename,
+            self.mode,
+            encoding=self.encoding,
+            errors=self.errors,
+            opener=lambda path, flags: os.open(path, flags, 0o600),
+        )
+        os.chmod(self.baseFilename, 0o600)  # a file from an older version
+        return stream
+
+
 def _setup_logging(verbose: bool, to_file: bool) -> None:
-    """Log to stderr (stdout is reserved for JSON) and, for ``mirror``, to a
-    debug log file, since the bar widget does not keep the helper's stderr."""
+    """Log to stderr (stdout is reserved for JSON) and, for ``mirror`` and
+    ``pair``, to a debug log file, since the bar widget does not keep the
+    helper's stderr.
+
+    pyatv's own debug output carries key material (pairing keys, stream keys),
+    so it is left out unless *verbose*.
+    """
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
     stderr = logging.StreamHandler(sys.stderr)
     stderr.setLevel(logging.DEBUG if verbose else logging.INFO)
@@ -336,12 +356,14 @@ def _setup_logging(verbose: bool, to_file: bool) -> None:
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
     root.addHandler(stderr)
+    logging.getLogger("pyatv").setLevel(logging.NOTSET if verbose else logging.INFO)
     if to_file:
         path = log_file()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        handler = logging.handlers.RotatingFileHandler(
-            path, maxBytes=2_000_000, backupCount=2
-        )
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(path.parent, 0o700)
+        for old in path.parent.glob(path.name + ".*"):
+            os.chmod(old, 0o600)
+        handler = _PrivateLog(path, maxBytes=2_000_000, backupCount=2)
         handler.setLevel(logging.DEBUG)
         handler.setFormatter(fmt)
         root.addHandler(handler)

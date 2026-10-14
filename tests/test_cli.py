@@ -1,5 +1,6 @@
 import json
 import os
+import stat
 
 import pytest
 
@@ -270,3 +271,27 @@ def test_firewall_command(capsys, monkeypatch):
     monkeypatch.setattr(firewall, "check", lambda port: {"port": port})
     assert run(capsys, "firewall") == (0, {"port": 47010})
     assert run(capsys, "firewall", "--timing-port", "5000") == (0, {"port": 5000})
+
+
+def test_the_log_file_is_private_and_keeps_pyatv_secrets_out():
+    import logging
+
+    cli._setup_logging(verbose=False, to_file=True)
+    logging.getLogger("pyatv.protocols.airplay.srp").debug("Authentication keys (Private=%s)", "ab" * 32)
+    logging.getLogger("omashare.mirror").info("audio: routed")
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+
+    path = cli.log_file()
+    text = path.read_text()
+    assert "Private=" not in text
+    assert "audio: routed" in text
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+
+
+def test_verbose_keeps_pyatv_debug():
+    import logging
+
+    cli._setup_logging(verbose=True, to_file=False)
+    assert logging.getLogger("pyatv").getEffectiveLevel() == logging.DEBUG
