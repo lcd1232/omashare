@@ -56,12 +56,13 @@ Panel {
 
   readonly property bool pinPairing: phase === "pin-request" || phase === "pin" || phase === "pin-check"
 
-  // ufw drops the receiver's timing requests until the port is allowed
-  // (bin/omashare firewall). phase "firewall" offers the one-time rule
-  // before sharing to pendingDevice.
+  // ufw drops the receivers' timing requests until the port is allowed
+  // (bin/omashare firewall); the panel then shows the command to allow it.
   property bool firewallBlocked: false
   property string firewallCommand: ""
-  property var pendingDevice: null
+  property bool commandCopied: false
+  // Text waiting to be written to wl-copy's stdin (see copyProc).
+  property string _pendingCopy: ""
 
   property int deviceIndex: 0
   property bool cursorActive: false
@@ -83,7 +84,6 @@ Panel {
     if (phase === "pin") return "Enter the PIN shown on " + (target ? target.name : "the TV")
     if (phase === "pin-check") return "Checking the PIN"
     if (phase === "stopping") return "Stopping"
-    if (phase === "firewall") return "Firewall blocks receivers"
     if (phase === "error") return "Failed"
     if (scanning) return "Searching for receivers"
     return devices.length ? devices.length + (devices.length === 1 ? " receiver" : " receivers") : "Not sharing"
@@ -168,21 +168,9 @@ Panel {
     if (!device || pinPairing) return
     if (sharing && target && target.address === device.address) stop()
     else if (!mirrorProc.running) {
-      if (firewallBlocked) {
-        pendingDevice = device
-        target = device
-        error = ""
-        phase = "firewall"
-        checkFirewall()
-      } else {
-        proceed(device)
-      }
+      if (device.paired) start(device)
+      else startPinPairing(device)
     }
-  }
-
-  function proceed(device) {
-    if (device.paired) start(device)
-    else startPinPairing(device)
   }
 
   function checkFirewall() {
@@ -196,26 +184,15 @@ Panel {
     try { result = JSON.parse(String(text || "").trim()) } catch (e) { return }
     firewallBlocked = result.allowed === false
     firewallCommand = String(result.command || "")
-    // The rule was added while the panel waited: carry on with the share.
-    if (phase === "firewall" && !firewallBlocked) continuePending()
   }
 
-  function allowInFirewall() {
-    if (firewallCommand === "") return
-    // Omarchy runs privileged steps in a floating terminal; sudo asks there.
-    Quickshell.execDetached(["omarchy-launch-floating-terminal-with-presentation", firewallCommand])
-  }
-
-  function continuePending() {
-    var device = pendingDevice
-    pendingDevice = null
-    phase = "idle"
-    if (device) proceed(device)
-  }
-
-  function cancelFirewall() {
-    pendingDevice = null
-    phase = "idle"
+  function copyFirewallCommand() {
+    if (firewallCommand === "" || copyProc.running) return
+    _pendingCopy = firewallCommand
+    copyProc.stdinEnabled = true
+    copyProc.running = true
+    commandCopied = true
+    copiedTimer.restart()
   }
 
   // One-time pairing: the receiver shows a PIN, which goes to the helper on
@@ -334,12 +311,30 @@ Panel {
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.applyFirewall(text) }
   }
 
-  // Notice the rule as soon as the terminal has added it.
+  // The notice goes away once the rule is added, with the panel still open.
   Timer {
-    interval: 1500
+    interval: 2000
     repeat: true
-    running: root.phase === "firewall"
+    running: root.opened && root.firewallBlocked
     onTriggered: root.checkFirewall()
+  }
+
+  Timer {
+    id: copiedTimer
+    interval: 2000
+    onTriggered: root.commandCopied = false
+  }
+
+  Process {
+    id: copyProc
+    command: ["wl-copy"]
+    stdinEnabled: false
+    onStarted: {
+      write(root._pendingCopy)
+      root._pendingCopy = ""
+      stdinEnabled = false  // closes stdin: wl-copy takes the text
+    }
+    onExited: { root._pendingCopy = ""; stdinEnabled = false }
   }
 
   Process {
@@ -573,10 +568,10 @@ Panel {
           }
         }
 
-        // One-time firewall rule: receivers send timing requests to this
-        // computer, and Omarchy's ufw drops incoming traffic.
+        // Receivers send timing requests to this computer while sharing, and
+        // Omarchy's ufw drops incoming traffic: shown until the rule exists.
         Column {
-          visible: root.phase === "firewall"
+          visible: root.firewallBlocked && root.firewallCommand !== ""
           width: parent.width
           spacing: Style.space(8)
 
@@ -584,51 +579,53 @@ Panel {
             width: parent.width
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
-            text: "While sharing, " + (root.target ? root.target.name : "the receiver")
-              + " sends timing requests to UDP port " + root.timingPort
-              + " on this computer, and the firewall drops them. Allow that port once:"
-            opacity: 0.7
-            color: root.bar.foreground
+            text: "The firewall blocks receivers. While sharing, they send timing requests to UDP port "
+              + root.timingPort + " on this computer. Allow it once in a terminal:"
+            color: Color.urgent
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.bodySmall
           }
 
-          Text {
+          // The command as a code block with a copy button, like a snippet on
+          // GitHub.
+          Rectangle {
             width: parent.width
-            textFormat: Text.PlainText
-            wrapMode: Text.WrapAnywhere
-            text: root.firewallCommand
-            color: root.bar.foreground
-            font.family: "monospace"
-            font.pixelSize: Style.font.bodySmall
-          }
+            implicitHeight: Math.max(commandText.implicitHeight, copyButton.height) + Style.space(8) * 2
+            radius: Style.cornerRadius
+            color: Style.normalFillFor(root.bar.foreground, root.bar.foreground, Color.urgent)
+            border.width: Style.normalBorderWidth
+            border.color: Style.normalBorderFor(root.bar.foreground, root.bar.foreground, Color.urgent)
 
-          Button {
-            width: parent.width
-            iconText: "󰒃"
-            text: "Allow in firewall"
-            foreground: root.bar.foreground
-            fontFamily: root.bar.fontFamily
-            bordered: true
-            onClicked: root.allowInFirewall()
-          }
-
-          Row {
-            spacing: Style.space(6)
-
-            Button {
-              text: "Share anyway"
-              tooltipText: "For a firewall rule added some other way"
-              foreground: root.bar.foreground
-              fontFamily: root.bar.fontFamily
-              onClicked: root.continuePending()
+            // Selectable, so it can be copied by hand without wl-clipboard.
+            TextEdit {
+              id: commandText
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(10)
+              anchors.verticalCenter: parent.verticalCenter
+              width: parent.width - Style.space(10) * 2 - copyButton.width - Style.space(6)
+              readOnly: true
+              selectByMouse: true
+              activeFocusOnPress: false
+              textFormat: TextEdit.PlainText
+              wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
+              text: root.firewallCommand
+              color: root.bar.foreground
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.bodySmall
             }
 
-            Button {
-              text: "Cancel"
-              foreground: root.bar.foreground
+            PanelActionButton {
+              id: copyButton
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(4)
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: root.commandCopied ? "󰄬" : "󰆏"
+              tooltipText: root.commandCopied ? "Copied" : "Copy"
+              foreground: root.commandCopied ? root.bar.foreground : Qt.darker(root.bar.foreground, 1.4)
+              hoverColor: root.bar.foreground
               fontFamily: root.bar.fontFamily
-              onClicked: root.cancelFirewall()
+              fontSize: Style.font.iconSmall
+              onClicked: root.copyFirewallCommand()
             }
           }
         }
@@ -720,7 +717,7 @@ Panel {
               foreground: root.bar.foreground
               fontFamily: root.bar.fontFamily
               active: current
-              enabled: current || (!root.sharing && !root.pinPairing && root.phase !== "firewall")
+              enabled: current || (!root.sharing && !root.pinPairing)
               hasCursor: root.cursorActive && root.deviceIndex === index
               onClicked: root.activate(index)
               onHovered: function(h) {

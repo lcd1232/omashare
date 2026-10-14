@@ -70,14 +70,13 @@ sudo ufw allow 47010/udp comment omashare
 ```
 
 The panel checks for it without root, by reading `/etc/ufw/ufw.conf` and
-`/etc/ufw/user.rules`, which anyone can read. When the rule is missing,
-picking a receiver first shows **Allow in firewall**. It runs the command
-above in a floating terminal, and the share starts once the rule is there.
-A rule for that port from your local networks only counts too. The port is
-a setting (`timingPort`, or `--timing-port`); the panel then offers the
-rule for the new port. Other firewalls aren't checked. If a receiver
-accepts the session and then stops answering, the panel says the timing
-port may be blocked.
+`/etc/ufw/user.rules`, which anyone can read. While the rule is missing, a
+notice at the top of the panel shows the command with a Copy button, and it
+goes away once the rule exists. A rule for that port from your local
+networks only counts too. The port is a setting (`timingPort`, or
+`--timing-port`), and the notice follows it. Other firewalls aren't checked.
+If a receiver accepts the session and then stops answering, the panel says
+the timing port may be blocked.
 
 ## Requirements
 
