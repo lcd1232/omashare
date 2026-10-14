@@ -579,8 +579,7 @@ Panel {
             width: parent.width
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
-            text: "The firewall blocks receivers. While sharing, they send timing requests to UDP port "
-              + root.timingPort + " on this computer. Allow it once in a terminal:"
+            text: "Firewall blocks AirPlay. Run once in a terminal:"
             color: Color.urgent
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.bodySmall
