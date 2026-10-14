@@ -24,7 +24,10 @@ Panel {
     var v = setting(name, fallback)
     return v === true || v === "true"
   }
-  readonly property int fps: Number(setting("fps", 30)) || 30
+  readonly property int fps: {
+    var v = Math.round(Number(setting("fps", 30)))
+    return v >= 15 && v <= 60 ? v : 30
+  }
   readonly property string maxResolution: String(setting("maxResolution", "1920x1080"))
   readonly property string audioMode: {
     var v = String(setting("audio", "tv"))
@@ -78,6 +81,19 @@ Panel {
     return dir ? dir + "/omashare-dnd-owned" : ""
   }
   property bool _pairCancelled: false
+
+  // The settings view replaces the receiver list while open.
+  property bool settingsOpen: false
+
+  // Save one setting into this widget's shell.json entry, as the first-party
+  // panels do; the shell then hands the new values back through `settings`.
+  function saveSetting(key, value) {
+    if (!bar || !bar.shell || typeof bar.shell.updateEntryInline !== "function") return
+    var entry = { id: moduleName }
+    for (var k in settings) if (k !== "id") entry[k] = settings[k]
+    entry[key] = value
+    bar.shell.updateEntryInline(moduleName, entry)
+  }
   // Text waiting to be written to wl-copy's stdin (see copyProc).
   property string _pendingCopy: ""
 
@@ -102,6 +118,7 @@ Panel {
     if (phase === "pin-check") return "Checking the PIN"
     if (phase === "stopping") return "Stopping"
     if (phase === "error") return "Failed"
+    if (settingsOpen) return "Settings"
     if (scanning) return "Searching for receivers"
     return devices.length ? devices.length + (devices.length === 1 ? " receiver" : " receivers") : "Not sharing"
   }
@@ -393,6 +410,7 @@ Panel {
   onOpenedChanged: {
     if (!opened) return
     cursorActive = false
+    settingsOpen = false
     checkStatus()
     checkFirewall()
     if (!sharing) scan()
@@ -565,12 +583,13 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
       onMoveRequested: function(dx, dy) {
-        if (root.devices.length === 0) return
+        if (root.settingsOpen || root.devices.length === 0) return
         if (!root.cursorActive) { root.cursorActive = true; return }
         var delta = dy !== 0 ? dy : dx
         root.deviceIndex = Math.max(0, Math.min(root.devices.length - 1, root.deviceIndex + delta))
       }
       onActivateRequested: {
+        if (root.settingsOpen) return
         if (root.cursorActive) root.activate(root.deviceIndex)
         else if (root.sharing) root.stop()
       }
@@ -600,11 +619,24 @@ Panel {
             anchors.verticalCenter: parent.verticalCenter
           }
 
+          PanelActionButton {
+            id: settingsButton
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: root.settingsOpen ? "󰅖" : "󰒓"
+            tooltipText: root.settingsOpen ? "Back to receivers" : "Settings"
+            foreground: Qt.darker(root.bar.foreground, 1.4)
+            hoverColor: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            onClicked: root.settingsOpen = !root.settingsOpen
+          }
+
           Column {
             id: heroLabels
             anchors.left: heroIcon.right
             anchors.leftMargin: Style.space(14)
-            anchors.right: parent.right
+            anchors.right: settingsButton.left
+            anchors.rightMargin: Style.space(8)
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(2)
 
@@ -633,7 +665,7 @@ Panel {
         }
 
         Text {
-          visible: root.phase === "error" && root.error !== ""
+          visible: !root.settingsOpen && root.phase === "error" && root.error !== ""
           width: parent.width
           textFormat: Text.PlainText
           text: root.error
@@ -647,7 +679,7 @@ Panel {
 
         // One-time PIN pairing with a receiver omashare has not paired yet.
         Column {
-          visible: root.pinPairing
+          visible: !root.settingsOpen && root.pinPairing
           width: parent.width
           spacing: Style.space(8)
 
@@ -705,7 +737,7 @@ Panel {
         // Receivers send timing requests to this computer while sharing, and
         // Omarchy's ufw drops incoming traffic: shown until the rule exists.
         Column {
-          visible: root.firewallBlocked && root.firewallCommand !== ""
+          visible: !root.settingsOpen && root.firewallBlocked && root.firewallCommand !== ""
           width: parent.width
           spacing: Style.space(8)
 
@@ -764,7 +796,7 @@ Panel {
         }
 
         Button {
-          visible: root.sharing || root.phase === "stopping"
+          visible: !root.settingsOpen && (root.sharing || root.phase === "stopping")
           width: parent.width
           iconText: "󰅙"
           text: root.phase === "stopping" ? "Stopping…" : "Stop sharing"
@@ -777,8 +809,155 @@ Panel {
 
         PanelSeparator { foreground: root.bar.foreground }
 
+        // ---------- Settings ----------
+        Column {
+          visible: root.settingsOpen
+          width: parent.width
+          spacing: Style.space(10)
+
+          PanelSectionHeader {
+            text: "VIDEO"
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+          }
+
+          Item {
+            width: parent.width
+            implicitHeight: fpsLabel.implicitHeight
+            Text {
+              id: fpsLabel
+              text: "Frame rate"
+              color: root.bar.foreground
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.body
+            }
+            Text {
+              anchors.right: parent.right
+              text: Math.round(fpsSlider.liveValue) + " fps"
+              color: Qt.darker(root.bar.foreground, 1.4)
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.body
+            }
+          }
+
+          PanelSlider {
+            id: fpsSlider
+            width: parent.width
+            bar: root.bar
+            minimum: 15
+            maximum: 60
+            step: 5
+            integer: true
+            tickCount: 10
+            value: root.fps
+            onReleased: function(v) { root.saveSetting("fps", Math.round(v)) }
+          }
+
+          Text {
+            text: "Maximum resolution"
+            color: root.bar.foreground
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.body
+          }
+          ButtonGroup {
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            fontSize: Style.font.bodySmall
+            options: [
+              { value: "1280x720", label: "720p" },
+              { value: "1920x1080", label: "1080p" },
+              { value: "3840x2160", label: "4K" }
+            ]
+            value: root.maxResolution
+            onChanged: function(v) { root.saveSetting("maxResolution", v) }
+          }
+
+          Text {
+            text: "What to share"
+            color: root.bar.foreground
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.body
+          }
+          ButtonGroup {
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            fontSize: Style.font.bodySmall
+            options: [
+              { value: "picker", label: "Ask each time" },
+              { value: "monitor", label: "Focused screen" }
+            ]
+            value: root.source
+            onChanged: function(v) { root.saveSetting("source", v) }
+          }
+
+          Toggle {
+            width: parent.width
+            label: "Show the mouse cursor"
+            checked: root.showCursor
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            titleSize: Style.font.body
+            onClicked: root.saveSetting("showCursor", !root.showCursor)
+          }
+
+          PanelSectionHeader {
+            text: "AUDIO"
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+          }
+          ButtonGroup {
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            fontSize: Style.font.bodySmall
+            options: [
+              { value: "tv", label: "Receiver only" },
+              { value: "both", label: "Both" },
+              { value: "off", label: "Off" }
+            ]
+            value: root.audioMode
+            onChanged: function(v) { root.saveSetting("audio", v) }
+          }
+
+          PanelSectionHeader {
+            text: "WHILE SHARING"
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+          }
+          Toggle {
+            width: parent.width
+            label: "Do Not Disturb"
+            description: "Keep notifications off the receiver"
+            checked: root.dndWhileSharing
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            titleSize: Style.font.body
+            onClicked: root.saveSetting("dndWhileSharing", !root.dndWhileSharing)
+          }
+          Toggle {
+            width: parent.width
+            label: "Start and stop notifications"
+            checked: root.notify
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            titleSize: Style.font.body
+            onClicked: root.saveSetting("notify", !root.notify)
+          }
+
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            text: "Changes apply to the next share."
+            opacity: 0.6
+            color: root.bar.foreground
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+        }
+
         // ---------- Receivers ----------
         Column {
+          visible: !root.settingsOpen
           width: parent.width
           spacing: Style.space(6)
 

@@ -112,6 +112,10 @@ o.bind("SUPER + CTRL + A", "Omashare", "omarchy-shell shell toggle lcd1232.omash
 
 ## Usage
 
+The gear button in the panel's header opens its settings: frame rate (15–60
+fps), maximum resolution, what to share, audio, and Do Not Disturb. Changes
+apply to the next share.
+
 Receivers you've paired with are listed first. Once the picture is up, Do
 Not Disturb turns on, so notifications don't show up on the TV. It turns off
 again when sharing stops, unless it was already on, and also after a shell

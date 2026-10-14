@@ -49,12 +49,12 @@
       },
       {
         "key": "fps",
-        "type": "enum",
+        "type": "integer",
         "label": "Frame rate",
-        "options": [
-          30,
-          60
-        ],
+        "description": "Frames per second sent to the receiver.",
+        "min": 15,
+        "max": 60,
+        "step": 5,
         "defaultValue": 30
       },
       {
