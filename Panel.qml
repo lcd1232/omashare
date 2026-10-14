@@ -767,7 +767,40 @@ Panel {
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             interactive: contentHeight > height
-            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+            // Always drawn while the list overflows: an auto-hiding bar gives
+            // no hint that more receivers are below.
+            ScrollBar.vertical: ScrollBar {
+              policy: deviceList.interactive ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+              contentItem: Rectangle {
+                implicitWidth: Style.space(4)
+                radius: width / 2
+                color: Qt.darker(root.bar.foreground, 1.8)
+              }
+            }
+
+            // Fades on the edges that have more rows past them.
+            Rectangle {
+              visible: deviceList.interactive && !deviceList.atYEnd
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              height: Style.space(28)
+              gradient: Gradient {
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 1.0; color: Color.popups.background }
+              }
+            }
+            Rectangle {
+              visible: deviceList.interactive && !deviceList.atYBeginning
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
+              height: Style.space(28)
+              gradient: Gradient {
+                GradientStop { position: 0.0; color: Color.popups.background }
+                GradientStop { position: 1.0; color: "transparent" }
+              }
+            }
 
             model: root.devices
             currentIndex: root.cursorActive ? root.deviceIndex : -1
