@@ -177,6 +177,31 @@ def test_pair_reports_a_refused_pin(store, capsys, monkeypatch):
     assert store.identity("AA") is None
 
 
+def test_pair_asks_again_after_a_wrong_pin(store, capsys, monkeypatch):
+    import io
+
+    from omashare import pairing
+
+    seen = []
+
+    async def retry(host, port, device_id, name, pin, store_):
+        seen.append(await pin())  # refused by the receiver
+        seen.append(await pin())
+        from pyatv.protocols.airplay.mirror import MediaIdentity
+
+        store_.save(device_id, name, MediaIdentity.generate())
+
+    monkeypatch.setattr(pairing, "pair", retry)
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO("1111\n2222\n"))
+    code, events = run_lines(capsys, "pair", "192.0.2.1", "--id", "AA", "--name", "Bedroom")
+    assert code == 0 and seen == ["1111", "2222"]
+    assert events == [
+        {"event": "pin", "id": "AA", "name": "Bedroom"},
+        {"event": "pin", "id": "AA", "name": "Bedroom", "retry": True},
+        {"event": "paired", "id": "AA", "name": "Bedroom"},
+    ]
+
+
 def test_pair_reports_a_receiver_that_refuses_before_the_pin(store, capsys, monkeypatch):
     from pyatv import exceptions
 

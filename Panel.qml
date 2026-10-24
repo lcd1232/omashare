@@ -82,6 +82,8 @@ Panel {
     return dir ? dir + "/omashare-dnd-owned" : ""
   }
   property bool _pairCancelled: false
+  // The receiver refused the last PIN and asked for it again.
+  property bool _pinRetry: false
 
   // The settings view replaces the receiver list while open.
   property bool settingsOpen: false
@@ -256,6 +258,7 @@ Panel {
     error = ""
     _paired = false
     _pairCancelled = false
+    _pinRetry = false
     phase = "pin-request"
     pairProc.command = [helperPath, "pair", device.address,
                         "--port", String(device.port || 7000),
@@ -303,6 +306,7 @@ Panel {
     var msg
     try { msg = JSON.parse(line) } catch (e) { return }
     if (msg.event === "pin") {
+      _pinRetry = msg.retry === true
       phase = "pin"
       pinField.text = ""
       pinField.forceActiveFocus()
@@ -696,7 +700,9 @@ Panel {
             wrapMode: Text.Wrap
             text: root.phase === "pin-request"
               ? "First time with " + (root.target ? root.target.name : "this TV") + ": it will show a PIN."
-              : "Type the 4-digit PIN from the TV screen."
+              : (root._pinRetry
+                ? "That PIN didn't match. Type the PIN from the TV screen again."
+                : "Type the 4-digit PIN from the TV screen.")
             opacity: 0.7
             color: root.bar.foreground
             font.family: root.bar.fontFamily

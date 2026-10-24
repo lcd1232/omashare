@@ -4,7 +4,8 @@ Every command prints JSON to stdout. ``mirror`` prints one JSON object per
 line as the session progresses (``{"event": "streaming", ...}``) and runs
 until SIGTERM/SIGINT or the receiver ends the session. ``pair`` prints
 ``{"event": "pin"}`` once the receiver shows its PIN, reads the PIN from a
-line on stdin, and ends with ``{"event": "paired"}``. A receiver that is not
+line on stdin, and ends with ``{"event": "paired"}``; after a wrong PIN it
+asks again with ``{"event": "pin", "retry": true}``. A receiver that is not
 paired yet makes ``mirror`` fail with ``{"event": "error", "code":
 "not-paired"}``. ``firewall`` says whether the host firewall lets receivers
 reach the timing port.
@@ -130,8 +131,11 @@ def cmd_pair(args) -> int:
 
     async def pin() -> str:
         nonlocal asked
+        if asked:
+            _emit("pin", id=device_id, name=name, retry=True)
+        else:
+            _emit("pin", id=device_id, name=name)
         asked = True
-        _emit("pin", id=device_id, name=name)
         line = await asyncio.get_running_loop().run_in_executor(
             None, sys.stdin.readline
         )
