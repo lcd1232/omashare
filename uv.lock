@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 
 [[package]]
@@ -1054,7 +1054,7 @@ wheels = [
 [[package]]
 name = "pyatv"
 version = "0.18.0"
-source = { git = "https://github.com/lcd1232/pyatv.git?rev=airplay-mirror-fairplay#52a7812be5daa040c4b8e2f4b1e03c2588881946" }
+source = { git = "https://github.com/lcd1232/pyatv.git?rev=airplay-mirror-fairplay#40bdb1a65cd9f5a897e2ce88469909cbb5a9413f" }
 dependencies = [
     { name = "aiohttp" },
     { name = "chacha20poly1305-reuseable" },
