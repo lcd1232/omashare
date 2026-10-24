@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "id": "lcd1232.omashare",
+  "name": "Omashare",
+  "version": "0.4.0",
+  "author": "lcd1232",
+  "license": "MIT",
+  "description": "Mirror your screen and its audio to an Apple TV over AirPlay, from the Omarchy bar. Prototype.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Omashare",
+    "description": "Find AirPlay receivers, pair with a PIN the first time, and mirror a screen, window or region with sound.",
+    "category": "Media",
+    "aliases": [
+      "airplay",
+      "apple tv",
+      "cast",
+      "mirror",
+      "screen share"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "fps": 30,
+      "maxResolution": "1920x1080",
+      "audio": "tv",
+      "showCursor": true,
+      "shareSource": "picker",
+      "timingPort": 47010,
+      "dndWhileSharing": true
+    },
+    "schema": [
+      {
+        "key": "shareSource",
+        "type": "enum",
+        "label": "What to share",
+        "description": "picker: choose a screen, window or region in the screen-share dialog each time. monitor: share the focused monitor without asking.",
+        "options": [
+          "picker",
+          "monitor"
+        ],
+        "defaultValue": "picker"
+      },
+      {
+        "key": "fps",
+        "type": "integer",
+        "label": "Frame rate",
+        "description": "Frames per second sent to the receiver.",
+        "min": 10,
+        "max": 60,
+        "step": 1,
+        "defaultValue": 30
+      },
+      {
+        "key": "maxResolution",
+        "type": "enum",
+        "label": "Maximum stream resolution",
+        "description": "The screen is scaled down to fit, keeping its aspect ratio.",
+        "options": [
+          "1280x720",
+          "1920x1080",
+          "3840x2160"
+        ],
+        "defaultValue": "1920x1080"
+      },
+      {
+        "key": "audio",
+        "type": "enum",
+        "label": "Screen audio",
+        "description": "tv: sound plays only on the receiver (local output is muted while sharing). both: also keep playing locally. off: video only.",
+        "options": [
+          "tv",
+          "both",
+          "off"
+        ],
+        "defaultValue": "tv"
+      },
+      {
+        "key": "showCursor",
+        "type": "boolean",
+        "label": "Show the mouse cursor",
+        "defaultValue": true
+      },
+      {
+        "key": "dndWhileSharing",
+        "type": "boolean",
+        "label": "Do Not Disturb while sharing",
+        "description": "Silence notifications while your screen is shared, so they don't appear on the receiver. Turned off again when sharing stops, unless it was already on.",
+        "defaultValue": true
+      },
+      {
+        "key": "timingPort",
+        "type": "integer",
+        "label": "Timing port (UDP)",
+        "description": "Receivers send clock-sync requests to this port while you share; the firewall must allow it. The panel offers the rule when it is missing.",
+        "min": 1024,
+        "max": 65535,
+        "step": 1,
+        "defaultValue": 47010
+      }
+    ]
+  }
+}

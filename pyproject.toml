@@ -1,0 +1,26 @@
+[project]
+name = "omashare"
+version = "0.4.0"
+description = "Mirror an Omarchy screen to an AirPlay receiver (Apple TV)"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    # AirPlay 2 screen mirroring lives on the fork's PR branch until it lands.
+    "pyatv @ git+https://github.com/lcd1232/pyatv.git@airplay-mirror-fairplay",
+]
+
+[project.scripts]
+omashare = "omashare.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
