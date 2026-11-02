@@ -1,12 +1,12 @@
 [project]
 name = "omashare"
-version = "0.4.0"
+version = "0.5.0"
 description = "Mirror an Omarchy screen to an AirPlay receiver (Apple TV)"
 license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     # AirPlay 2 screen mirroring lives on the fork's PR branch until it lands.
-    "pyatv @ git+https://github.com/lcd1232/pyatv.git@master",
+    "pyatv @ git+https://github.com/lcd1232/pyatv.git@15cc8da8c733c379bd2ab916269551f2bec17e21",
 ]
 
 [project.scripts]

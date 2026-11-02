@@ -2,9 +2,51 @@
 
 Mirror your Omarchy screen to an Apple TV over AirPlay, from the bar.
 
-> **Prototype.** Uses the AirPlay 2 mirroring sender from
-> [lcd1232/pyatv#1](https://github.com/lcd1232/pyatv/pull/1)
-> (`airplay-mirror-fairplay` branch). It isn't in upstream pyatv yet.
+![Omashare panel listing AirPlay receivers](preview.png)
+
+> Uses the AirPlay 2 mirroring sender from the
+> [lcd1232/pyatv](https://github.com/lcd1232/pyatv) fork
+> ([#1](https://github.com/lcd1232/pyatv/pull/1)), pinned to a commit. It
+> isn't in upstream pyatv yet.
+
+## Install
+
+```sh
+omarchy plugin add https://github.com/lcd1232/omashare --enable
+```
+
+The widget appears on the right of the bar. The first scan sets up the
+helper's Python environment with `uv` in
+`~/.local/share/omashare/venv`, so it takes a little longer. The receiver
+sends clock-sync requests to UDP port 47010, and Omarchy's firewall blocks
+them by default. The panel shows the one `ufw` rule to add (see
+[Firewall](#firewall)).
+
+Update with `omarchy plugin update lcd1232.omashare`.
+
+## Remove
+
+```sh
+omarchy plugin remove lcd1232.omashare
+rm -rf ~/.local/share/omashare ~/.config/omashare ~/.local/state/omashare
+sudo ufw delete allow 47010/udp   # if you added the firewall rule
+```
+
+`~/.config/omashare` holds your receiver pairings.
+
+## Dependencies
+
+All of these come with Omarchy:
+
+- `uv`: runs the Python helper and installs its packages on first use:
+  [pyatv](https://github.com/lcd1232/pyatv) (MIT, the fork above) and its
+  dependencies.
+- `gpu-screen-recorder` and `ffmpeg`: screen capture and H.264.
+- `pactl`/`parec` (PipeWire): audio capture.
+- `libfdk-aac`: AAC-ELD audio encoding.
+- `avahi-browse` (optional): receiver discovery. Without it, pyatv's own
+  scan is used.
+- `ufw`: only read, to check the firewall rule.
 
 ## How it works
 
@@ -86,8 +128,7 @@ by Kyle Seongwoo Jun (MIT), vendored in `src/omashare/data/`.
 
 ## Requirements
 
-- Omarchy with the Quickshell-based shell; `gpu-screen-recorder`, `ffmpeg`,
-  `uv`, `pactl`/`parec` and `libfdk-aac`, which Omarchy ships with
+- Omarchy with the Quickshell-based shell (see [Dependencies](#dependencies))
 - An Apple TV on the same network. Set its AirPlay access to *Everyone on the
   same network* (Settings → AirPlay and HomeKit → Allow Access).
 
