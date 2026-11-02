@@ -6,7 +6,7 @@ license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     # AirPlay 2 screen mirroring lives on the fork's PR branch until it lands.
-    "pyatv @ git+https://github.com/lcd1232/pyatv.git@airplay-mirror-fairplay",
+    "pyatv @ git+https://github.com/lcd1232/pyatv.git@master",
 ]
 
 [project.scripts]

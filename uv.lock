@@ -885,7 +885,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pyatv", git = "https://github.com/lcd1232/pyatv.git?rev=airplay-mirror-fairplay" }]
+requires-dist = [{ name = "pyatv", git = "https://github.com/lcd1232/pyatv.git?rev=master" }]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8" }]
@@ -1054,7 +1054,7 @@ wheels = [
 [[package]]
 name = "pyatv"
 version = "0.18.0"
-source = { git = "https://github.com/lcd1232/pyatv.git?rev=airplay-mirror-fairplay#40bdb1a65cd9f5a897e2ce88469909cbb5a9413f" }
+source = { git = "https://github.com/lcd1232/pyatv.git?rev=master#15cc8da8c733c379bd2ab916269551f2bec17e21" }
 dependencies = [
     { name = "aiohttp" },
     { name = "chacha20poly1305-reuseable" },
